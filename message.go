@@ -6,19 +6,19 @@ import (
 	"time"
 )
 
-// Version is the OSPF version supported by this library (OSPFv3).
-const Version = 3
+// version is the OSPF version supported by this library (OSPFv3).
+const version = 3
 
-// A PacketType is the type of an OSPFv3 packet.
-type PacketType uint8
+// A packetType is the type of an OSPFv3 packet.
+type packetType uint8
 
 // Possible OSPFv3 packet types.
 const (
-	HelloPacket                    PacketType = 1
-	DatabaseDescriptionPacket      PacketType = 2
-	LinkStateRequestPacket         PacketType = 3
-	LinkStateUpdatePacket          PacketType = 4
-	LinkStateAcknowledgementPacket PacketType = 5
+	hello                    packetType = 1
+	databaseDescription      packetType = 2
+	linkStateRequest         packetType = 3
+	linkStateUpdate          packetType = 4
+	linkStateAcknowledgement packetType = 5
 )
 
 // An ID is a four byte identifier typically used for OSPFv3 router and/or area
@@ -95,22 +95,24 @@ func (o Options) String() string {
 const headerLen = 16
 
 // A Header is the OSPFv3 packet header as described in RFC5340, appendix A.3.1.
+// Headers accompany each Message implementation. The Header only allows setting
+// OSPFv3 header fields which are not calculated programmatically. Version,
+// packet type, and packet length are set automatically when calling
+// MarshalMessage.
 type Header struct {
-	Version      uint8
-	Type         PacketType
-	PacketLength uint16
-	RouterID     ID
-	AreaID       ID
-	Checksum     uint16
-	InstanceID   uint8
+	RouterID   ID
+	AreaID     ID
+	Checksum   uint16
+	InstanceID uint8
 }
 
-// marshal packs a Header's bytes into b. It assumes b has allocated enough
-// space for a Header to avoid a panic.
-func (h *Header) marshal(b []byte) error {
-	b[0] = h.Version
-	b[1] = byte(h.Type)
-	binary.BigEndian.PutUint16(b[2:4], h.PacketLength)
+// marshal packs a Header's bytes into b while also setting packet type and
+// length. It assumes b has allocated enough space for a Header to avoid a
+// panic.
+func (h *Header) marshal(b []byte, ptyp packetType, plen uint16) error {
+	b[0] = version
+	b[1] = byte(ptyp)
+	binary.BigEndian.PutUint16(b[2:4], plen)
 	copy(b[4:8], h.RouterID[:])
 	copy(b[8:12], h.AreaID[:])
 	binary.BigEndian.PutUint16(b[12:14], h.Checksum)
@@ -122,21 +124,18 @@ func (h *Header) marshal(b []byte) error {
 
 // parseHeader parses an OSPFv3 Header and the offset of the end of an OSPF
 // packet from bytes.
-func parseHeader(b []byte) (Header, int, error) {
+func parseHeader(b []byte) (Header, packetType, int, error) {
 	if l := len(b); l < headerLen {
-		return Header{}, 0, fmt.Errorf("ospf3: not enough bytes for OSPFv3 header: %d", l)
+		return Header{}, 0, 0, fmt.Errorf("ospf3: not enough bytes for OSPFv3 header: %d", l)
 	}
 
-	if v := b[0]; v != Version {
-		return Header{}, 0, fmt.Errorf("ospf3: unrecognized OSPF version: %d", v)
+	if v := b[0]; v != version {
+		return Header{}, 0, 0, fmt.Errorf("ospf3: unrecognized OSPF version: %d", v)
 	}
 
 	h := Header{
-		Version:      b[0],
-		Type:         PacketType(b[1]),
-		PacketLength: binary.BigEndian.Uint16(b[2:4]),
-		Checksum:     binary.BigEndian.Uint16(b[12:14]),
-		InstanceID:   b[14],
+		Checksum:   binary.BigEndian.Uint16(b[12:14]),
+		InstanceID: b[14],
 		// b[15] is reserved.
 	}
 	copy(h.RouterID[:], b[4:8])
@@ -146,21 +145,16 @@ func parseHeader(b []byte) (Header, int, error) {
 
 	// Make sure the input buffer has enough data as indicated by the packet
 	// length field so we know how much to pass to Message.unmarshal.
-	if h.PacketLength < headerLen {
-		return Header{}, 0, fmt.Errorf("ospf3: header packet length %d is too short for a valid packet", h.PacketLength)
+	plen := int(binary.BigEndian.Uint16(b[2:4]))
+	if plen < headerLen {
+		return Header{}, 0, 0, fmt.Errorf("ospf3: header packet length %d is too short for a valid packet", plen)
 	}
-	if l := len(b); l < int(h.PacketLength) {
-		return Header{}, 0, fmt.Errorf("ospf3: header packet length is %d bytes but only %d bytes are available",
-			h.PacketLength, l)
-	}
-
-	// Clamp the max to the packet length if it's shorter than the buffer.
-	max := len(b)
-	if int(h.PacketLength) < len(b) {
-		max = int(h.PacketLength)
+	if l := len(b); l < plen {
+		return Header{}, 0, 0, fmt.Errorf("ospf3: header packet length is %d bytes but only %d bytes are available",
+			plen, l)
 	}
 
-	return h, max, nil
+	return h, packetType(b[1]), plen, nil
 }
 
 // A Message is an OSPFv3 message.
@@ -174,7 +168,7 @@ type Message interface {
 func MarshalMessage(m Message) ([]byte, error) {
 	// Allocate enough space for the fixed length Header and then the
 	// appropriate number of bytes for the trailing message.
-	b := make([]byte, headerLen+m.len())
+	b := make([]byte, m.len())
 	if err := m.marshal(b); err != nil {
 		return nil, err
 	}
@@ -184,9 +178,9 @@ func MarshalMessage(m Message) ([]byte, error) {
 
 // ParseMessage parses an OSPFv3 Header and trailing Message from bytes.
 func ParseMessage(b []byte) (Message, error) {
-	// The Header is added to each Message and max is the offset where the
-	// packet ends.
-	h, max, err := parseHeader(b)
+	// The Header is added to each Message and the parsed type and length are
+	// used to choose the appropriate Message and its end offset.
+	h, ptyp, plen, err := parseHeader(b)
 	if err != nil {
 		return nil, err
 	}
@@ -194,18 +188,18 @@ func ParseMessage(b []byte) (Message, error) {
 	// Now that we've decoded the Header we can identify the rest of the
 	// payload as a known Message type.
 	var m Message
-	switch h.Type {
-	case HelloPacket:
+	switch ptyp {
+	case hello:
 		m = &Hello{Header: h}
 	default:
 		// TODO(mdlayher): implement more Messages!
-		return nil, fmt.Errorf("ospf3: parsing not implemented message type: %s", h.Type)
+		return nil, fmt.Errorf("ospf3: parsing not implemented message type: %d", ptyp)
 	}
 
 	// The unmarshal methods assume the header has already been processed so
 	// just pass the rest of the payload up to the max defined by
 	// Header.PacketLength.
-	if err := m.unmarshal(b[headerLen:max]); err != nil {
+	if err := m.unmarshal(b[headerLen:plen]); err != nil {
 		return nil, err
 	}
 
@@ -236,15 +230,15 @@ const helloLen = 20
 
 // len implements Message.
 func (h *Hello) len() int {
-	// Fixed Hello plus 4 bytes per neighbor ID.
-	return helloLen + (4 * len(h.NeighborIDs))
+	// Fixed Header and Hello, plus 4 bytes per neighbor ID.
+	return headerLen + helloLen + (4 * len(h.NeighborIDs))
 }
 
 // marshal implements Message.
 func (h *Hello) marshal(b []byte) error {
 	// Marshal the Header and then store the Hello bytes following it.
 	const n = headerLen
-	if err := h.Header.marshal(b[:n]); err != nil {
+	if err := h.Header.marshal(b[:n], hello, uint16(h.len())); err != nil {
 		return err
 	}
 
