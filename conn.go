@@ -21,8 +21,8 @@ type Conn struct {
 	groups []*net.IPAddr
 }
 
-// Dial creates a *Conn using the specified network interface.
-func Dial(ifi *net.Interface) (*Conn, error) {
+// Listen creates a *Conn using the specified network interface.
+func Listen(ifi *net.Interface) (*Conn, error) {
 	// IP protocol number 89 is OSPF.
 	conn, err := net.ListenPacket("ip6:89", "::")
 	if err != nil {
