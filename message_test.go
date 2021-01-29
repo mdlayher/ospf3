@@ -28,14 +28,14 @@ func TestParseMessage(t *testing.T) {
 		{
 			name: "unknown message type",
 			b: append(
-				[]byte{0x03, 0xff},
+				[]byte{Version, 0xff},
 				bytes.Repeat([]byte{0x00}, 14)...,
 			),
 		},
 		{
 			name: "short header",
 			b: []byte{
-				0x03,
+				Version,
 				uint8(HelloPacket),
 				0x00, 0x00, // Zero length
 				0x00, 0x00,
@@ -48,7 +48,7 @@ func TestParseMessage(t *testing.T) {
 		{
 			name: "bad packet length",
 			b: []byte{
-				0x03,
+				Version,
 				uint8(HelloPacket),
 				0xff, 0xff, // Max length
 				0x00, 0x00,
@@ -61,7 +61,7 @@ func TestParseMessage(t *testing.T) {
 		{
 			name: "short hello",
 			b: []byte{
-				0x03,
+				Version,
 				uint8(HelloPacket),
 				0x00, 17, // Header + 1 trailing byte
 				0x00, 0x00,
@@ -76,7 +76,7 @@ func TestParseMessage(t *testing.T) {
 			name: "OK hello",
 			b: []byte{
 				// Header
-				0x03,               // OSPFv3
+				Version,            // OSPFv3
 				uint8(HelloPacket), // Hello
 				0x00, 40,           // PacketLength
 				192, 0, 2, 1, // Router ID

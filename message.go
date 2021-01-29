@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// Version is the OSPF version supported by this library (OSPFv3).
+const Version = 3
+
 // A PacketType is the type of an OSPFv3 packet.
 type PacketType uint8
 
@@ -102,20 +105,15 @@ type Header struct {
 	InstanceID   uint8
 }
 
-// A Message is an OSPFv3 message.
-type Message interface {
-	unmarshal(b []byte) error
-}
-
-// ParseMessage parses an OSPFv3 Header and trailing Message from bytes.
-func ParseMessage(b []byte) (Message, error) {
+// parseHeader parses an OSPFv3 Header and the offset of the end of an OSPF
+// packet from bytes.
+func parseHeader(b []byte) (Header, int, error) {
 	if l := len(b); l < headerLen {
-		return nil, fmt.Errorf("ospf3: not enough bytes for OSPFv3 header: %d", l)
+		return Header{}, 0, fmt.Errorf("ospf3: not enough bytes for OSPFv3 header: %d", l)
 	}
 
-	const version = 3
-	if v := b[0]; v != version {
-		return nil, fmt.Errorf("ospf3: unrecognized OSPF version: %d", v)
+	if v := b[0]; v != Version {
+		return Header{}, 0, fmt.Errorf("ospf3: unrecognized OSPF version: %d", v)
 	}
 
 	h := Header{
@@ -129,13 +127,15 @@ func ParseMessage(b []byte) (Message, error) {
 	copy(h.RouterID[:], b[4:8])
 	copy(h.AreaID[:], b[8:12])
 
+	// TODO(mdlayher): inspect Checksum?
+
 	// Make sure the input buffer has enough data as indicated by the packet
 	// length field so we know how much to pass to Message.unmarshal.
 	if h.PacketLength < headerLen {
-		return nil, fmt.Errorf("ospf3: header packet length %d is too short for a valid packet", h.PacketLength)
+		return Header{}, 0, fmt.Errorf("ospf3: header packet length %d is too short for a valid packet", h.PacketLength)
 	}
 	if l := len(b); l < int(h.PacketLength) {
-		return nil, fmt.Errorf("ospf3: header packet length is %d bytes but only %d bytes are available",
+		return Header{}, 0, fmt.Errorf("ospf3: header packet length is %d bytes but only %d bytes are available",
 			h.PacketLength, l)
 	}
 
@@ -145,7 +145,22 @@ func ParseMessage(b []byte) (Message, error) {
 		max = int(h.PacketLength)
 	}
 
-	// TODO(mdlayher): inspect Checksum?
+	return h, max, nil
+}
+
+// A Message is an OSPFv3 message.
+type Message interface {
+	unmarshal(b []byte) error
+}
+
+// ParseMessage parses an OSPFv3 Header and trailing Message from bytes.
+func ParseMessage(b []byte) (Message, error) {
+	// The Header is added to each Message and max is the offset where the
+	// packet ends.
+	h, max, err := parseHeader(b)
+	if err != nil {
+		return nil, err
+	}
 
 	// Now that we've decoded the Header we can identify the rest of the
 	// payload as a known Message type.
