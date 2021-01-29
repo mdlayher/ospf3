@@ -129,7 +129,23 @@ func ParseMessage(b []byte) (Message, error) {
 	copy(h.RouterID[:], b[4:8])
 	copy(h.AreaID[:], b[8:12])
 
-	// TODO(mdlayher): inspect PacketLength and Checksum.
+	// Make sure the input buffer has enough data as indicated by the packet
+	// length field so we know how much to pass to Message.unmarshal.
+	if h.PacketLength < headerLen {
+		return nil, fmt.Errorf("ospf3: header packet length %d is too short for a valid packet", h.PacketLength)
+	}
+	if l := len(b); l < int(h.PacketLength) {
+		return nil, fmt.Errorf("ospf3: header packet length is %d bytes but only %d bytes are available",
+			h.PacketLength, l)
+	}
+
+	// Clamp the max to the packet length if it's shorter than the buffer.
+	max := len(b)
+	if int(h.PacketLength) < len(b) {
+		max = int(h.PacketLength)
+	}
+
+	// TODO(mdlayher): inspect Checksum?
 
 	// Now that we've decoded the Header we can identify the rest of the
 	// payload as a known Message type.
@@ -142,9 +158,10 @@ func ParseMessage(b []byte) (Message, error) {
 		return nil, fmt.Errorf("ospf3: parsing not implemented message type: %s", h.Type)
 	}
 
-	// The unmarshal methods assume the header has already been processed
-	// so just pass the rest of the payload.
-	if err := m.unmarshal(b[headerLen:]); err != nil {
+	// The unmarshal methods assume the header has already been processed so
+	// just pass the rest of the payload up to the max defined by
+	// Header.PacketLength.
+	if err := m.unmarshal(b[headerLen:max]); err != nil {
 		return nil, err
 	}
 

@@ -33,11 +33,11 @@ func TestParseMessage(t *testing.T) {
 			),
 		},
 		{
-			name: "short hello",
+			name: "short header",
 			b: []byte{
 				0x03,
 				uint8(HelloPacket),
-				0x00, 0x00,
+				0x00, 0x00, // Zero length
 				0x00, 0x00,
 				192, 0, 2, 1,
 				0, 0, 0, 0,
@@ -46,12 +46,39 @@ func TestParseMessage(t *testing.T) {
 			},
 		},
 		{
+			name: "bad packet length",
+			b: []byte{
+				0x03,
+				uint8(HelloPacket),
+				0xff, 0xff, // Max length
+				0x00, 0x00,
+				192, 0, 2, 1,
+				0, 0, 0, 0,
+				0x01,
+				0x00,
+			},
+		},
+		{
+			name: "short hello",
+			b: []byte{
+				0x03,
+				uint8(HelloPacket),
+				0x00, 17, // Header + 1 trailing byte
+				0x00, 0x00,
+				192, 0, 2, 1,
+				0, 0, 0, 0,
+				0x01,
+				0x00,
+				0xff, // Truncated Hello
+			},
+		},
+		{
 			name: "OK hello",
 			b: []byte{
 				// Header
 				0x03,               // OSPFv3
 				uint8(HelloPacket), // Hello
-				0x00, 0x00,         // PacketLength
+				0x00, 40,           // PacketLength
 				192, 0, 2, 1, // Router ID
 				0, 0, 0, 0, // Area ID
 				0x00, 0x00, // Checksum
@@ -67,13 +94,17 @@ func TestParseMessage(t *testing.T) {
 				192, 0, 2, 1, // Designated router ID
 				192, 0, 2, 2, // Backup designated router ID
 				192, 0, 2, 2, // Neighbor ID
+
+				// Trailing bytes, ignored
+				0x00, 0x00, 0x00, 0x00,
 			},
 			m: &Hello{
 				Header: Header{
-					Version:    3,
-					Type:       HelloPacket,
-					RouterID:   ID{192, 0, 2, 1},
-					InstanceID: 1,
+					Version:      3,
+					Type:         HelloPacket,
+					PacketLength: 40,
+					RouterID:     ID{192, 0, 2, 1},
+					InstanceID:   1,
 				},
 				InterfaceID:              1,
 				RouterPriority:           1,
