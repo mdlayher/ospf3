@@ -73,12 +73,12 @@ func TestParseMessage(t *testing.T) {
 			},
 		},
 		{
-			name: "OK hello",
+			name: "bad hello neighbor IDs",
 			b: []byte{
 				// Header
 				Version,            // OSPFv3
 				uint8(HelloPacket), // Hello
-				0x00, 40,           // PacketLength
+				0x00, 39,           // PacketLength
 				192, 0, 2, 1, // Router ID
 				0, 0, 0, 0, // Area ID
 				0x00, 0x00, // Checksum
@@ -93,7 +93,34 @@ func TestParseMessage(t *testing.T) {
 				0x00, 0x0a, // Router dead interval
 				192, 0, 2, 1, // Designated router ID
 				192, 0, 2, 2, // Backup designated router ID
-				192, 0, 2, 2, // Neighbor ID
+				// Neighbor IDs, truncated
+				192, 0, 2,
+			},
+		},
+		{
+			name: "OK hello",
+			b: []byte{
+				// Header
+				Version,            // OSPFv3
+				uint8(HelloPacket), // Hello
+				0x00, 44,           // PacketLength
+				192, 0, 2, 1, // Router ID
+				0, 0, 0, 0, // Area ID
+				0x00, 0x00, // Checksum
+				0x01, // InstanceID
+				0x00, // Reserved
+
+				// Hello
+				0x00, 0x00, 0x00, 0x01, // Interface ID
+				0x01,                                 // Router priority
+				0x00, 0x00, byte(V6Bit) | byte(EBit), // Options
+				0x00, 0x05, // Hello interval
+				0x00, 0x0a, // Router dead interval
+				192, 0, 2, 1, // Designated router ID
+				192, 0, 2, 2, // Backup designated router ID
+				// Neighbor IDs
+				192, 0, 2, 2,
+				192, 0, 2, 3,
 
 				// Trailing bytes, ignored
 				0x00, 0x00, 0x00, 0x00,
@@ -102,7 +129,7 @@ func TestParseMessage(t *testing.T) {
 				Header: Header{
 					Version:      3,
 					Type:         HelloPacket,
-					PacketLength: 40,
+					PacketLength: 44,
 					RouterID:     ID{192, 0, 2, 1},
 					InstanceID:   1,
 				},
@@ -113,7 +140,10 @@ func TestParseMessage(t *testing.T) {
 				RouterDeadInterval:       10 * time.Second,
 				DesignatedRouterID:       ID{192, 0, 2, 1},
 				BackupDesignatedRouterID: ID{192, 0, 2, 2},
-				NeighborID:               &ID{192, 0, 2, 2},
+				NeighborIDs: []ID{
+					{192, 0, 2, 2},
+					{192, 0, 2, 3},
+				},
 			},
 			ok: true,
 		},

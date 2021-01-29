@@ -198,13 +198,23 @@ type Hello struct {
 	RouterDeadInterval       time.Duration
 	DesignatedRouterID       ID
 	BackupDesignatedRouterID ID
-	NeighborID               *ID
+	NeighborIDs              []ID
 }
+
+// helloLen is the length of a Hello message with no trailing array of neighbor
+// IDs.
+const helloLen = 20
 
 // unmarshal implements Message.
 func (h *Hello) unmarshal(b []byte) error {
-	if l := len(b); l < 20 {
+	if l := len(b); l < helloLen {
 		return fmt.Errorf("ospf3: not enough bytes for Hello: %d", l)
+	}
+
+	// Hello must end on a 4 byte boundary so we can parse any possible
+	// NeighborIDs in the trailing array.
+	if l := len(b); l%4 != 0 {
+		return fmt.Errorf("ospf3: Hello message must end on a 4 byte boundary, got %d bytes", l)
 	}
 
 	h.InterfaceID = binary.BigEndian.Uint32(b[0:4])
@@ -216,10 +226,13 @@ func (h *Hello) unmarshal(b []byte) error {
 	copy(h.DesignatedRouterID[:], b[12:16])
 	copy(h.BackupDesignatedRouterID[:], b[16:20])
 
-	if len(b) >= 24 {
-		// This is a "Hello Seen", attach the optional NeighborID.
-		h.NeighborID = &ID{}
-		copy((*h.NeighborID)[:], b[20:24])
+	// Allocate enough space for each trailing neighbor ID after the fixed
+	// length Hello and parse each one.
+	h.NeighborIDs = make([]ID, 0, len(b[helloLen:])/4)
+	for i := helloLen; i < len(b); i += 4 {
+		var id ID
+		copy(id[:], b[i:i+4])
+		h.NeighborIDs = append(h.NeighborIDs, id)
 	}
 
 	return nil
