@@ -8,12 +8,10 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func TestParseMessage(t *testing.T) {
+func TestParseMessageErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		b    []byte
-		m    Message
-		ok   bool
 	}{
 		{
 			name: "empty",
@@ -97,8 +95,25 @@ func TestParseMessage(t *testing.T) {
 				192, 0, 2,
 			},
 		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := ParseMessage(tt.b); err == nil {
+				t.Fatal("expected an error, but none occurred")
+			}
+		})
+	}
+}
+
+func TestMessageRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		b    []byte
+		m    Message
+	}{
 		{
-			name: "OK hello",
+			name: "hello",
 			b: []byte{
 				// Header
 				Version,            // OSPFv3
@@ -145,26 +160,78 @@ func TestParseMessage(t *testing.T) {
 					{192, 0, 2, 3},
 				},
 			},
-			ok: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m, err := ParseMessage(tt.b)
-			if tt.ok && err != nil {
-				t.Fatalf("failed to unmarshal: %v", err)
-			}
-			if !tt.ok && err == nil {
-				t.Fatal("expected an error, but none occurred")
-			}
+			m1, err := ParseMessage(tt.b)
 			if err != nil {
-				t.Logf("err: %v", err)
-				return
+				t.Fatalf("failed to parse first Message: %v", err)
 			}
 
-			if diff := cmp.Diff(tt.m, m); diff != "" {
-				t.Fatalf("unexpected Message (-want +got):\n%s", diff)
+			if diff := cmp.Diff(tt.m, m1); diff != "" {
+				t.Fatalf("unexpected initial Message (-want +got):\n%s", diff)
+			}
+
+			b, err := MarshalMessage(m1)
+			if err != nil {
+				t.Fatalf("failed to marshal: %v", err)
+			}
+
+			if diff := cmp.Diff(tt.b[:len(b)], b); diff != "" {
+				t.Fatalf("unexpected bytes (-want +got):\n%s", diff)
+			}
+
+			m2, err := ParseMessage(b)
+			if err != nil {
+				t.Fatalf("failed to parse second Message: %v", err)
+			}
+
+			if diff := cmp.Diff(m1, m2); diff != "" {
+				t.Fatalf("unexpected final Message (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func BenchmarkMarshalMessage(b *testing.B) {
+	tests := []struct {
+		name string
+		m    Message
+	}{
+		{
+			name: "Hello",
+			m: &Hello{
+				Header: Header{
+					Version:      Version,
+					Type:         HelloPacket,
+					PacketLength: 44,
+					RouterID:     ID{192, 0, 2, 1},
+					InstanceID:   1,
+				},
+				InterfaceID:              1,
+				RouterPriority:           1,
+				Options:                  V6Bit | EBit,
+				HelloInterval:            5 * time.Second,
+				RouterDeadInterval:       10 * time.Second,
+				DesignatedRouterID:       ID{192, 0, 2, 1},
+				BackupDesignatedRouterID: ID{192, 0, 2, 2},
+				NeighborIDs: []ID{
+					{192, 0, 2, 2},
+					{192, 0, 2, 3},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := MarshalMessage(tt.m); err != nil {
+					b.Fatalf("failed to marshal: %v", err)
+				}
 			}
 		})
 	}

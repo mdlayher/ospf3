@@ -105,6 +105,21 @@ type Header struct {
 	InstanceID   uint8
 }
 
+// marshal packs a Header's bytes into b. It assumes b has allocated enough
+// space for a Header to avoid a panic.
+func (h *Header) marshal(b []byte) error {
+	b[0] = h.Version
+	b[1] = byte(h.Type)
+	binary.BigEndian.PutUint16(b[2:4], h.PacketLength)
+	copy(b[4:8], h.RouterID[:])
+	copy(b[8:12], h.AreaID[:])
+	binary.BigEndian.PutUint16(b[12:14], h.Checksum)
+	b[14] = h.InstanceID
+	// b[15] is reserved.
+
+	return nil
+}
+
 // parseHeader parses an OSPFv3 Header and the offset of the end of an OSPF
 // packet from bytes.
 func parseHeader(b []byte) (Header, int, error) {
@@ -150,7 +165,21 @@ func parseHeader(b []byte) (Header, int, error) {
 
 // A Message is an OSPFv3 message.
 type Message interface {
+	len() int
+	marshal(b []byte) error
 	unmarshal(b []byte) error
+}
+
+// MarshalMessage turns a Message into OSPFv3 packet bytes.
+func MarshalMessage(m Message) ([]byte, error) {
+	// Allocate enough space for the fixed length Header and then the
+	// appropriate number of bytes for the trailing message.
+	b := make([]byte, headerLen+m.len())
+	if err := m.marshal(b); err != nil {
+		return nil, err
+	}
+
+	return b, nil
 }
 
 // ParseMessage parses an OSPFv3 Header and trailing Message from bytes.
@@ -204,6 +233,38 @@ type Hello struct {
 // helloLen is the length of a Hello message with no trailing array of neighbor
 // IDs.
 const helloLen = 20
+
+// len implements Message.
+func (h *Hello) len() int {
+	// Fixed Hello plus 4 bytes per neighbor ID.
+	return helloLen + (4 * len(h.NeighborIDs))
+}
+
+// marshal implements Message.
+func (h *Hello) marshal(b []byte) error {
+	// Marshal the Header and then store the Hello bytes following it.
+	const n = headerLen
+	if err := h.Header.marshal(b[:n]); err != nil {
+		return err
+	}
+
+	binary.BigEndian.PutUint32(b[n:n+4], h.InterfaceID)
+	// Router priority is 8 bits, Options is 24 bits immediately following.
+	binary.BigEndian.PutUint32(b[n+4:n+8], uint32(h.RouterPriority)<<24|uint32(h.Options))
+	binary.BigEndian.PutUint16(b[n+8:n+10], uint16(h.HelloInterval.Seconds()))
+	binary.BigEndian.PutUint16(b[n+10:n+12], uint16(h.RouterDeadInterval.Seconds()))
+	copy(b[n+12:n+16], h.DesignatedRouterID[:])
+	copy(b[n+16:n+20], h.BackupDesignatedRouterID[:])
+
+	// Each neighbor ID is packed into 4 adjacent bytes.
+	nn := n + 20
+	for i := range h.NeighborIDs {
+		copy(b[nn:nn+4], h.NeighborIDs[i][:])
+		nn += 4
+	}
+
+	return nil
+}
 
 // unmarshal implements Message.
 func (h *Hello) unmarshal(b []byte) error {
