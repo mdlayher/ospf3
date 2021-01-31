@@ -54,6 +54,12 @@ const (
 	ATBit    Options = 1 << 10
 )
 
+// options parses Options as a uint32 and then masks off the high 8 bits to
+// interpret b as a 24-bit Options bitmask.
+func options(b []byte) Options {
+	return Options(binary.BigEndian.Uint32(b) & 0x00ffffff)
+}
+
 // valid checks if the Options bitmask is valid; that is, if it only has bits
 // set in the lower 24 bits of the uint32.
 func (o Options) valid() bool { return (o & 0xff000000) == 0 }
@@ -235,8 +241,8 @@ func (h *Hello) marshal(b []byte) error {
 	binary.BigEndian.PutUint32(b[n:n+4], h.InterfaceID)
 	// Router priority is 8 bits, Options is 24 bits immediately following.
 	binary.BigEndian.PutUint32(b[n+4:n+8], uint32(h.RouterPriority)<<24|uint32(h.Options))
-	binary.BigEndian.PutUint16(b[n+8:n+10], uint16(h.HelloInterval.Seconds()))
-	binary.BigEndian.PutUint16(b[n+10:n+12], uint16(h.RouterDeadInterval.Seconds()))
+	putUint16Seconds(b[n+8:n+10], h.HelloInterval)
+	putUint16Seconds(b[n+10:n+12], h.RouterDeadInterval)
 	copy(b[n+12:n+16], h.DesignatedRouterID[:])
 	copy(b[n+16:n+20], h.BackupDesignatedRouterID[:])
 
@@ -265,9 +271,9 @@ func (h *Hello) unmarshal(b []byte) error {
 	h.InterfaceID = binary.BigEndian.Uint32(b[0:4])
 	h.RouterPriority = b[4]
 	// Options is 24 bits.
-	h.Options = Options(binary.BigEndian.Uint32(b[4:8]) & 0x00ffffff)
-	h.HelloInterval = time.Duration(binary.BigEndian.Uint16(b[8:10])) * time.Second
-	h.RouterDeadInterval = time.Duration(binary.BigEndian.Uint16(b[10:12])) * time.Second
+	h.Options = options(b[4:8])
+	h.HelloInterval = uint16Seconds(b[8:10])
+	h.RouterDeadInterval = uint16Seconds(b[10:12])
 	copy(h.DesignatedRouterID[:], b[12:16])
 	copy(h.BackupDesignatedRouterID[:], b[16:20])
 
@@ -360,7 +366,7 @@ func (dd *DatabaseDescription) unmarshal(b []byte) error {
 
 	// b[0] is reserved.
 	// Options is 24 bits.
-	dd.Options = Options(binary.BigEndian.Uint32(b[0:4]) & 0x00ffffff)
+	dd.Options = options(b[0:4])
 	dd.InterfaceMTU = binary.BigEndian.Uint16(b[4:6])
 	// b[6] is reserved
 	dd.Flags = DDFlags(b[7])
@@ -449,7 +455,7 @@ const lsaHeaderLen = 20
 // marshal stores the LSAHeader bytes into b. It assumes b has allocated enough
 // space for an LSAHeader to avoid a panic.
 func (h LSAHeader) marshal(b []byte) {
-	binary.BigEndian.PutUint16(b[0:2], uint16(h.Age.Seconds()))
+	putUint16Seconds(b[0:2], h.Age)
 	binary.BigEndian.PutUint16(b[2:4], uint16(h.Type))
 	copy(b[4:8], h.LinkStateID[:])
 	copy(b[8:12], h.AdvertisingRouter[:])
@@ -461,7 +467,7 @@ func (h LSAHeader) marshal(b []byte) {
 // parseLSAHeader unpacks an LSAHeader from a byte slice.
 func parseLSAHeader(b []byte) LSAHeader {
 	h := LSAHeader{
-		Age:            time.Duration(binary.BigEndian.Uint16(b[0:2])) * time.Second,
+		Age:            uint16Seconds(b[0:2]),
 		Type:           LSType(binary.BigEndian.Uint16(b[2:4])),
 		SequenceNumber: binary.BigEndian.Uint32(b[12:16]),
 		Checksum:       binary.BigEndian.Uint16(b[16:18]),
@@ -471,6 +477,17 @@ func parseLSAHeader(b []byte) LSAHeader {
 	copy(h.AdvertisingRouter[:], b[8:12])
 
 	return h
+}
+
+// uint16Seconds interprets big endian uint16 bytes as a number of seconds.
+func uint16Seconds(b []byte) time.Duration {
+	return time.Duration(binary.BigEndian.Uint16(b)) * time.Second
+}
+
+// putUint16Seconds stores d in b as big endian uint16 bytes, rounded to the
+// nearest whole second.
+func putUint16Seconds(b []byte, d time.Duration) {
+	binary.BigEndian.PutUint16(b, uint16(d.Round(time.Second).Seconds()))
 }
 
 // flagsString generates a pretty-printed flags bitmask using the input value
