@@ -11,8 +11,10 @@ const (
 	// version is the OSPF version supported by this library (OSPFv3).
 	version = 3
 
-	// Fixed length structures.
+	// Fixed length structures. Note that lsrLen doesn't exist since that
+	// message only contains LSAs.
 	headerLen    = 16
+	lsaLen       = 12
 	lsaHeaderLen = 20
 	helloLen     = 20 // No trailing array of neighbor IDs.
 	ddLen        = 12 // No trailing array of LSA headers.
@@ -190,6 +192,8 @@ func ParseMessage(b []byte) (Message, error) {
 		m = &Hello{Header: h}
 	case databaseDescription:
 		m = &DatabaseDescription{Header: h}
+	case linkStateRequest:
+		m = &LinkStateRequest{Header: h}
 	default:
 		// TODO(mdlayher): implement more Messages!
 		return nil, fmt.Errorf("ospf3: parsing not implemented message type: %d", ptyp)
@@ -389,6 +393,64 @@ func (dd *DatabaseDescription) unmarshal(b []byte) error {
 	return nil
 }
 
+var _ Message = &LinkStateRequest{}
+
+// A LinkStateRequest is an OSPFv3 Link State Request message as described
+// in RFC5340, appendix A.3.4.
+type LinkStateRequest struct {
+	Header Header
+	LSAs   []LSA
+}
+
+// len implements Message.
+func (lsr *LinkStateRequest) len() int {
+	// Fixed Header plus 12 bytes per LSA. Notably this message has no body
+	// of its own.
+	return headerLen + (lsaLen * len(lsr.LSAs))
+}
+
+// marshal implements Message.
+func (lsr *LinkStateRequest) marshal(b []byte) error {
+	// Marshal the Header and then store the LSA bytes following it.
+	const n = headerLen
+	lsr.Header.marshal(b[:n], linkStateRequest, uint16(lsr.len()))
+
+	// Each LSA is packed into 12 adjacent bytes.
+	nn := n
+	for i := range lsr.LSAs {
+		// LSA.Type offset is 2 bytes in due to reserved space.
+		lsr.LSAs[i].marshal(b[2+nn : nn+lsaLen])
+		nn += lsaLen
+	}
+
+	return nil
+}
+
+// unmarshal implements Message.
+func (lsr *LinkStateRequest) unmarshal(b []byte) error {
+	// LinkStateRequest must end on a 12 byte boundary so we can parse any
+	// possible LSAs in the trailing array.
+	if l := len(b); l%lsaLen != 0 {
+		return fmt.Errorf("LinkStateRequest message must end on a 12 byte boundary for trailing LSAs, got %d bytes: %w", l, errParse)
+	}
+
+	// We now know the number of LSAs because they have a fixed size.
+	n := len(b) / lsaLen
+	lsr.LSAs = make([]LSA, 0, n)
+	for i := 0; i < n; i++ {
+		// Parse each 12 byte LSA from the slice. Note that the first two bytes
+		// are reserved so start parsing LSA.Type at 2 bytes.
+		var (
+			start = 2 + (i * lsaLen)
+			end   = lsaLen + (i * lsaLen)
+		)
+
+		lsr.LSAs = append(lsr.LSAs, parseLSA(b[start:end]))
+	}
+
+	return nil
+}
+
 // An LSType is the type of an OSPFv3 Link State Advertisement as described in
 // RFC5340, appendix A.4.2.1.
 type LSType uint16
@@ -431,25 +493,45 @@ const (
 	reservedScoping  FloodingScope = 0b11
 )
 
-// An LSAHeader is an OSPFv3 Link State Advertisement header as described in
-// RFC5340, appendix A.4.2.
-type LSAHeader struct {
-	Age               time.Duration
+// An LSA is an OSPFv3 Link State Advertisement as described in RFC5340, section
+// 4.4.
+type LSA struct {
 	Type              LSType
 	LinkStateID       ID
 	AdvertisingRouter ID
-	SequenceNumber    uint32
-	Checksum          uint16
-	Length            uint16
+}
+
+// marshal packs an LSA's bytes into b. It assumes b has allocated enough space
+// for an LSA to avoid a panic.
+func (l LSA) marshal(b []byte) {
+	binary.BigEndian.PutUint16(b[0:2], uint16(l.Type))
+	copy(b[2:6], l.LinkStateID[:])
+	copy(b[6:10], l.AdvertisingRouter[:])
+}
+
+// parseLSA unpacks an LSA from a byte slice.
+func parseLSA(b []byte) LSA {
+	l := LSA{Type: LSType(binary.BigEndian.Uint16(b[0:2]))}
+	copy(l.LinkStateID[:], b[2:6])
+	copy(l.AdvertisingRouter[:], b[6:10])
+	return l
+}
+
+// An LSAHeader is an OSPFv3 Link State Advertisement header as described in
+// RFC5340, appendix A.4.2.
+type LSAHeader struct {
+	Age            time.Duration
+	LSA            LSA
+	SequenceNumber uint32
+	Checksum       uint16
+	Length         uint16
 }
 
 // marshal stores the LSAHeader bytes into b. It assumes b has allocated enough
 // space for an LSAHeader to avoid a panic.
 func (h LSAHeader) marshal(b []byte) {
 	putUint16Seconds(b[0:2], h.Age)
-	binary.BigEndian.PutUint16(b[2:4], uint16(h.Type))
-	copy(b[4:8], h.LinkStateID[:])
-	copy(b[8:12], h.AdvertisingRouter[:])
+	h.LSA.marshal(b[2:12])
 	binary.BigEndian.PutUint32(b[12:16], h.SequenceNumber)
 	binary.BigEndian.PutUint16(b[16:18], h.Checksum)
 	binary.BigEndian.PutUint16(b[18:20], h.Length)
@@ -457,17 +539,13 @@ func (h LSAHeader) marshal(b []byte) {
 
 // parseLSAHeader unpacks an LSAHeader from a byte slice.
 func parseLSAHeader(b []byte) LSAHeader {
-	h := LSAHeader{
+	return LSAHeader{
 		Age:            uint16Seconds(b[0:2]),
-		Type:           LSType(binary.BigEndian.Uint16(b[2:4])),
+		LSA:            parseLSA(b[2:12]),
 		SequenceNumber: binary.BigEndian.Uint32(b[12:16]),
 		Checksum:       binary.BigEndian.Uint16(b[16:18]),
 		Length:         binary.BigEndian.Uint16(b[18:20]),
 	}
-	copy(h.LinkStateID[:], b[4:8])
-	copy(h.AdvertisingRouter[:], b[8:12])
-
-	return h
 }
 
 // uint16Seconds interprets big endian uint16 bytes as a number of seconds.

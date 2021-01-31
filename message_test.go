@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	msgHello = []byte{
+	bufHello = []byte{
 		// Header
 		version,      // OSPFv3
 		uint8(hello), // Hello
@@ -41,7 +41,25 @@ var (
 		0x00, 0x00, 0x00, 0x00,
 	}
 
-	msgDatabaseDescription = []byte{
+	msgHello = &Hello{
+		Header: Header{
+			RouterID:   ID{192, 0, 2, 1},
+			InstanceID: 1,
+		},
+		InterfaceID:              1,
+		RouterPriority:           1,
+		Options:                  V6Bit | EBit,
+		HelloInterval:            5 * time.Second,
+		RouterDeadInterval:       10 * time.Second,
+		DesignatedRouterID:       ID{192, 0, 2, 1},
+		BackupDesignatedRouterID: ID{192, 0, 2, 2},
+		NeighborIDs: []ID{
+			{192, 0, 2, 2},
+			{192, 0, 2, 3},
+		},
+	}
+
+	bufDatabaseDescription = []byte{
 		// Header
 		version,                    // OSPFv3
 		uint8(databaseDescription), // Database Description
@@ -81,6 +99,82 @@ var (
 
 		// Trailing bytes, ignored
 		0x00, 0x00, 0x00, 0x00,
+	}
+
+	msgDatabaseDescription = &DatabaseDescription{
+		Header: Header{
+			RouterID:   ID{192, 0, 2, 1},
+			InstanceID: 1,
+		},
+		Options:        V6Bit | EBit | RBit | AFBit,
+		InterfaceMTU:   1500,
+		Flags:          IBit | MBit,
+		SequenceNumber: 1,
+		LSAs: []LSAHeader{
+			{
+				Age: 1 * time.Second,
+				LSA: LSA{
+					Type:              RouterLSA,
+					AdvertisingRouter: ID{192, 0, 2, 1},
+				},
+				SequenceNumber: 255,
+				Length:         20,
+			},
+			{
+				Age: 2 * time.Second,
+				LSA: LSA{
+					Type:              LinkLSA,
+					LinkStateID:       ID{0, 0, 0, 5},
+					AdvertisingRouter: ID{192, 0, 2, 1},
+				},
+				SequenceNumber: 511,
+				Length:         20,
+			},
+		},
+	}
+
+	bufLinkStateRequest = []byte{
+		// Header
+		version,                 // OSPFv3
+		uint8(linkStateRequest), // Link State Request
+		0x00, 40,                // PacketLength
+		192, 0, 2, 1, // Router ID
+		0, 0, 0, 0, // Area ID
+		0x00, 0x00, // Checksum
+		0x01, // InstanceID
+		0x00, // Reserved
+
+		// LinkStateRequest LSAs
+		//
+		// Router-LSA
+		0x00, 0x00, // Reserved
+		byte(RouterLSA >> 8), byte(RouterLSA & 0x00ff), // Type
+		0, 0, 0, 0, // Link state ID
+		192, 0, 2, 1, // Advertising router
+
+		// Link-LSA
+		0x00, 0x00, // Reserved
+		byte(LinkLSA >> 8), byte(LinkLSA & 0x00ff), // Type
+		0, 0, 0, 5, // Link state ID
+		192, 0, 2, 1, // Advertising router
+	}
+
+	msgLinkStateRequest = &LinkStateRequest{
+		Header: Header{
+			RouterID:   ID{192, 0, 2, 1},
+			InstanceID: 1,
+		},
+		LSAs: []LSA{
+			{
+				Type:              RouterLSA,
+				AdvertisingRouter: ID{192, 0, 2, 1},
+			},
+			{
+				Type:              LinkLSA,
+				LinkStateID:       ID{0, 0, 0, 5},
+				AdvertisingRouter: ID{192, 0, 2, 1},
+			},
+		},
 	}
 )
 
@@ -211,6 +305,21 @@ func TestParseMessageErrors(t *testing.T) {
 				0xff,
 			},
 		},
+		{
+			name: "bad link state request LSA",
+			b: []byte{
+				version,
+				uint8(linkStateRequest),
+				0x00, 17, // Header + 1 trailing byte
+				0x00, 0x00,
+				192, 0, 2, 1,
+				0, 0, 0, 0,
+				0x01,
+				0x00,
+
+				0xff, // Truncated LSA
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -267,55 +376,18 @@ func TestMessageRoundTrip(t *testing.T) {
 	}{
 		{
 			name: "hello",
-			b:    msgHello,
-			m: &Hello{
-				Header: Header{
-					RouterID:   ID{192, 0, 2, 1},
-					InstanceID: 1,
-				},
-				InterfaceID:              1,
-				RouterPriority:           1,
-				Options:                  V6Bit | EBit,
-				HelloInterval:            5 * time.Second,
-				RouterDeadInterval:       10 * time.Second,
-				DesignatedRouterID:       ID{192, 0, 2, 1},
-				BackupDesignatedRouterID: ID{192, 0, 2, 2},
-				NeighborIDs: []ID{
-					{192, 0, 2, 2},
-					{192, 0, 2, 3},
-				},
-			},
+			b:    bufHello,
+			m:    msgHello,
 		},
 		{
 			name: "database description",
-			b:    msgDatabaseDescription,
-			m: &DatabaseDescription{
-				Header: Header{
-					RouterID:   ID{192, 0, 2, 1},
-					InstanceID: 1,
-				},
-				Options:        V6Bit | EBit | RBit | AFBit,
-				InterfaceMTU:   1500,
-				Flags:          IBit | MBit,
-				SequenceNumber: 1,
-				LSAs: []LSAHeader{
-					{
-						Age:               1 * time.Second,
-						Type:              RouterLSA,
-						AdvertisingRouter: ID{192, 0, 2, 1},
-						SequenceNumber:    255,
-						Length:            20,
-					},
-					{
-						Age:               2 * time.Second,
-						Type:              LinkLSA,
-						LinkStateID:       ID{0, 0, 0, 5},
-						AdvertisingRouter: ID{192, 0, 2, 1},
-						SequenceNumber:    511,
-						Length:            20,
-					},
-				},
-			},
+			b:    bufDatabaseDescription,
+			m:    msgDatabaseDescription,
+		},
+		{
+			name: "link state request",
+			b:    bufLinkStateRequest,
+			m:    msgLinkStateRequest,
 		},
 	}
 
@@ -392,54 +464,16 @@ func BenchmarkMarshalMessage(b *testing.B) {
 		m    Message
 	}{
 		{
-			name: "Hello",
-			m: &Hello{
-				Header: Header{
-					RouterID:   ID{192, 0, 2, 1},
-					InstanceID: 1,
-				},
-				InterfaceID:              1,
-				RouterPriority:           1,
-				Options:                  V6Bit | EBit,
-				HelloInterval:            5 * time.Second,
-				RouterDeadInterval:       10 * time.Second,
-				DesignatedRouterID:       ID{192, 0, 2, 1},
-				BackupDesignatedRouterID: ID{192, 0, 2, 2},
-				NeighborIDs: []ID{
-					{192, 0, 2, 2},
-					{192, 0, 2, 3},
-				},
-			},
+			name: "hello",
+			m:    msgHello,
 		},
 		{
-			name: "DatabaseDescription",
-			m: &DatabaseDescription{
-				Header: Header{
-					RouterID:   ID{192, 0, 2, 1},
-					InstanceID: 1,
-				},
-				Options:        V6Bit | EBit | RBit | AFBit,
-				InterfaceMTU:   1500,
-				Flags:          IBit | MBit,
-				SequenceNumber: 1,
-				LSAs: []LSAHeader{
-					{
-						Age:               1 * time.Second,
-						Type:              RouterLSA,
-						AdvertisingRouter: ID{192, 0, 2, 1},
-						SequenceNumber:    255,
-						Length:            20,
-					},
-					{
-						Age:               2 * time.Second,
-						Type:              LinkLSA,
-						LinkStateID:       ID{0, 0, 0, 5},
-						AdvertisingRouter: ID{192, 0, 2, 1},
-						SequenceNumber:    511,
-						Length:            20,
-					},
-				},
-			},
+			name: "database description",
+			m:    msgDatabaseDescription,
+		},
+		{
+			name: "link state request",
+			m:    msgLinkStateRequest,
 		},
 	}
 
@@ -461,12 +495,16 @@ func BenchmarkParseMessage(b *testing.B) {
 		b    []byte
 	}{
 		{
-			name: "Hello",
-			b:    msgHello,
+			name: "hello",
+			b:    bufHello,
 		},
 		{
-			name: "DatabaseDescription",
-			b:    msgDatabaseDescription,
+			name: "database description",
+			b:    bufDatabaseDescription,
+		},
+		{
+			name: "link state request",
+			b:    bufLinkStateRequest,
 		},
 	}
 
