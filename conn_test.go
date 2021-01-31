@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/mdlayher/ospf3"
@@ -88,8 +89,13 @@ func TestConn(t *testing.T) {
 func testConns(t *testing.T) (c1, c2 *ospf3.Conn) {
 	t.Helper()
 
+	const (
+		veth0 = "vethospf0"
+		veth1 = "vethospf1"
+	)
+
 	var veths [2]*net.Interface
-	for i, v := range []string{"vethospf0", "vethospf1"} {
+	for i, v := range []string{veth0, veth1} {
 		ifi, err := net.InterfaceByName(v)
 		if err != nil {
 			var nerr *net.OpError
@@ -102,6 +108,9 @@ func testConns(t *testing.T) (c1, c2 *ospf3.Conn) {
 
 		veths[i] = ifi
 	}
+
+	// Now that we have the veths, make sure they're usable.
+	waitInterfacesReady(t, veth0, veth1)
 
 	var conns [2]*ospf3.Conn
 	for i, v := range veths {
@@ -119,6 +128,87 @@ func testConns(t *testing.T) (c1, c2 *ospf3.Conn) {
 	}
 
 	return conns[0], conns[1]
+}
+
+func waitInterfacesReady(t *testing.T, ifi0, ifi1 string) {
+	t.Helper()
+
+	a, err := net.InterfaceByName(ifi0)
+	if err != nil {
+		t.Fatalf("failed to get first interface: %v", err)
+	}
+
+	b, err := net.InterfaceByName(ifi1)
+	if err != nil {
+		t.Fatalf("failed to get second interface: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		if i > 0 {
+			time.Sleep(1 * time.Second)
+			t.Log("waiting for interface readiness...")
+		}
+
+		aaddrs, err := a.Addrs()
+		if err != nil {
+			t.Fatalf("failed to get first addresses: %v", err)
+		}
+
+		baddrs, err := b.Addrs()
+		if err != nil {
+			t.Fatalf("failed to get second addresses: %v", err)
+		}
+
+		if len(aaddrs) == 0 || len(baddrs) == 0 {
+			// No addresses yet.
+			continue
+		}
+
+		// Do we have a link-local address assigned to each interface, and
+		// can we bind to that address?
+		if !linkLocalReady(t, aaddrs, ifi0) || !linkLocalReady(t, baddrs, ifi1) {
+			continue
+		}
+
+		return
+	}
+
+	t.Fatal("failed to wait for interface readiness")
+}
+
+func linkLocalReady(t *testing.T, addrs []net.Addr, zone string) bool {
+	t.Helper()
+
+	for _, a := range addrs {
+		ip, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+
+		if ip.IP.To16() == nil || ip.IP.To4() != nil || !ip.IP.IsLinkLocalUnicast() {
+			continue
+		}
+
+		// We've found a link-local IPv6 address. Try to bind a random socket to
+		// it to verify the address is ready for use.
+		addr := &net.UDPAddr{
+			IP:   ip.IP,
+			Port: 0,
+			Zone: zone,
+		}
+
+		l, err := net.ListenPacket("udp", addr.String())
+		if err != nil {
+			return false
+		}
+		_ = l.Close()
+
+		t.Logf("ready: %s", addr.String())
+
+		return true
+	}
+
+	return false
 }
 
 func panicf(format string, a ...interface{}) {
