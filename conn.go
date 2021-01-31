@@ -7,10 +7,14 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-// Multicast groups used by OSPFv3.
 var (
-	allSPFRouters = &net.IPAddr{IP: net.ParseIP("ff02::5")}
-	allDRouters   = &net.IPAddr{IP: net.ParseIP("ff02::6")}
+	// AllSPFRouters is the IPv6 multicast group address that all routers
+	// running OSPFv3 should participate in.
+	AllSPFRouters = &net.IPAddr{IP: net.ParseIP("ff02::5")}
+
+	// AllDRouters is the IPv6 multicast group address that the Designated
+	// Router and Backup Designated Router running OSPFv3 must participate in.
+	AllDRouters = &net.IPAddr{IP: net.ParseIP("ff02::6")}
 )
 
 // A Conn can send and receive OSPFv3 messages which implement the Message
@@ -38,9 +42,9 @@ func Listen(ifi *net.Interface) (*Conn, error) {
 
 	// Join the appropriate multicast groups. Note that point-to-point links
 	// don't use DR/BDR and can skip joining that group.
-	groups := []*net.IPAddr{allSPFRouters}
+	groups := []*net.IPAddr{AllSPFRouters}
 	if ifi.Flags&net.FlagPointToPoint == 0 {
-		groups = append(groups, allDRouters)
+		groups = append(groups, AllDRouters)
 	}
 
 	for _, g := range groups {
@@ -91,4 +95,25 @@ func (c *Conn) ReadFrom() (Message, *ipv6.ControlMessage, *net.IPAddr, error) {
 
 		return m, cm, src.(*net.IPAddr), nil
 	}
+}
+
+// WriteTo writes a single OSPFv3 Message to the specified destination address
+// with an optional IPv6 control message. If cm is nil, a default control
+// message will be used with parameters specific to OSPFv3.
+func (c *Conn) WriteTo(m Message, cm *ipv6.ControlMessage, dst *net.IPAddr) error {
+	b, err := MarshalMessage(m)
+	if err != nil {
+		return err
+	}
+
+	if cm == nil {
+		cm = &ipv6.ControlMessage{
+			TrafficClass: 0xc0, // DSCP CS6, per appendix A.1.
+			HopLimit:     1,    // Always 1.
+			IfIndex:      c.ifi.Index,
+		}
+	}
+
+	_, err = c.c.WriteTo(b, cm, dst)
+	return err
 }
