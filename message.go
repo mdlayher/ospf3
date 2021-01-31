@@ -7,8 +7,16 @@ import (
 	"time"
 )
 
-// version is the OSPF version supported by this library (OSPFv3).
-const version = 3
+const (
+	// version is the OSPF version supported by this library (OSPFv3).
+	version = 3
+
+	// Fixed length structures.
+	headerLen    = 16
+	lsaHeaderLen = 20
+	helloLen     = 20 // No trailing array of neighbor IDs.
+	ddLen        = 12 // No trailing array of LSA headers.
+)
 
 // Sentinel errors used to differentiate various types of errors in tests.
 var (
@@ -80,9 +88,6 @@ func (o Options) String() string {
 		"AT-bit",
 	})
 }
-
-// headerLen is the length of an OSPFv3 header.
-const headerLen = 16
 
 // A Header is the OSPFv3 packet header as described in RFC5340, appendix A.3.1.
 // Headers accompany each Message implementation. The Header only allows setting
@@ -200,9 +205,6 @@ func ParseMessage(b []byte) (Message, error) {
 	return m, nil
 }
 
-// TODO(mdlayher): consider breaking out Hello/HelloSeen or using methods to
-// more clearly differentiate whether or not NeighborID is or should be set.
-
 var _ Message = &Hello{}
 
 // A Hello is an OSPFv3 Hello message as described in RFC5340, appendix A.3.2.
@@ -217,10 +219,6 @@ type Hello struct {
 	BackupDesignatedRouterID ID
 	NeighborIDs              []ID
 }
-
-// helloLen is the length of a Hello message with no trailing array of neighbor
-// IDs.
-const helloLen = 20
 
 // len implements Message.
 func (h *Hello) len() int {
@@ -321,10 +319,6 @@ type DatabaseDescription struct {
 	SequenceNumber uint32
 	LSAs           []LSAHeader
 }
-
-// ddLen is the length of a Database Description message with no trailing array
-// of LSA headers.
-const ddLen = 12
 
 // len implements Message.
 func (dd *DatabaseDescription) len() int {
@@ -448,9 +442,6 @@ type LSAHeader struct {
 	Checksum          uint16
 	Length            uint16
 }
-
-// lsaHeaderLen is the length of an LSA header.
-const lsaHeaderLen = 20
 
 // marshal stores the LSAHeader bytes into b. It assumes b has allocated enough
 // space for an LSAHeader to avoid a panic.
