@@ -89,13 +89,8 @@ func TestConn(t *testing.T) {
 func testConns(t *testing.T) (c1, c2 *ospf3.Conn) {
 	t.Helper()
 
-	const (
-		veth0 = "vethospf0"
-		veth1 = "vethospf1"
-	)
-
 	var veths [2]*net.Interface
-	for i, v := range []string{veth0, veth1} {
+	for i, v := range []string{"vethospf0", "vethospf1"} {
 		ifi, err := net.InterfaceByName(v)
 		if err != nil {
 			var nerr *net.OpError
@@ -110,7 +105,7 @@ func testConns(t *testing.T) (c1, c2 *ospf3.Conn) {
 	}
 
 	// Now that we have the veths, make sure they're usable.
-	waitInterfacesReady(t, veth0, veth1)
+	waitInterfacesReady(t, veths[0], veths[1])
 
 	var conns [2]*ospf3.Conn
 	for i, v := range veths {
@@ -130,18 +125,8 @@ func testConns(t *testing.T) (c1, c2 *ospf3.Conn) {
 	return conns[0], conns[1]
 }
 
-func waitInterfacesReady(t *testing.T, ifi0, ifi1 string) {
+func waitInterfacesReady(t *testing.T, a, b *net.Interface) {
 	t.Helper()
-
-	a, err := net.InterfaceByName(ifi0)
-	if err != nil {
-		t.Fatalf("failed to get first interface: %v", err)
-	}
-
-	b, err := net.InterfaceByName(ifi1)
-	if err != nil {
-		t.Fatalf("failed to get second interface: %v", err)
-	}
 
 	for i := 0; i < 5; i++ {
 		if i > 0 {
@@ -166,7 +151,7 @@ func waitInterfacesReady(t *testing.T, ifi0, ifi1 string) {
 
 		// Do we have a link-local address assigned to each interface, and
 		// can we bind to that address?
-		if !linkLocalReady(t, aaddrs, ifi0) || !linkLocalReady(t, baddrs, ifi1) {
+		if !linkLocalReady(t, aaddrs, a.Name) || !linkLocalReady(t, baddrs, b.Name) {
 			continue
 		}
 
