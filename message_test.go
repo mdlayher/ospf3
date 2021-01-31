@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 var (
@@ -215,8 +216,8 @@ func TestParseMessageErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ParseMessage(tt.b)
-			if err == nil {
-				t.Fatal("expected an error, but none occurred")
+			if diff := cmp.Diff(errParse, err, cmpopts.EquateErrors()); diff != "" {
+				t.Fatalf("unexpected error (-want +got):\n%s", diff)
 			}
 
 			t.Logf("err: %v", err)

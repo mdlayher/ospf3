@@ -2,12 +2,16 @@ package ospf3
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 )
 
 // version is the OSPF version supported by this library (OSPFv3).
 const version = 3
+
+// Sentinel errors used to differentiate various types of errors in tests.
+var errParse = errors.New("failed to parse bytes")
 
 // A packetType is the type of an OSPFv3 packet.
 type packetType uint8
@@ -97,11 +101,11 @@ func (h *Header) marshal(b []byte, ptyp packetType, plen uint16) {
 // packet from bytes.
 func parseHeader(b []byte) (Header, packetType, int, error) {
 	if l := len(b); l < headerLen {
-		return Header{}, 0, 0, fmt.Errorf("ospf3: not enough bytes for OSPFv3 header: %d", l)
+		return Header{}, 0, 0, fmt.Errorf("not enough bytes for OSPFv3 header: %d: %w", l, errParse)
 	}
 
 	if v := b[0]; v != version {
-		return Header{}, 0, 0, fmt.Errorf("ospf3: unrecognized OSPF version: %d", v)
+		return Header{}, 0, 0, fmt.Errorf("unrecognized OSPF version: %d: %w", v, errParse)
 	}
 
 	h := Header{
@@ -118,11 +122,11 @@ func parseHeader(b []byte) (Header, packetType, int, error) {
 	// length field so we know how much to pass to Message.unmarshal.
 	plen := int(binary.BigEndian.Uint16(b[2:4]))
 	if plen < headerLen {
-		return Header{}, 0, 0, fmt.Errorf("ospf3: header packet length %d is too short for a valid packet", plen)
+		return Header{}, 0, 0, fmt.Errorf("header packet length %d is too short for a valid packet: %w", plen, errParse)
 	}
 	if l := len(b); l < plen {
-		return Header{}, 0, 0, fmt.Errorf("ospf3: header packet length is %d bytes but only %d bytes are available",
-			plen, l)
+		return Header{}, 0, 0, fmt.Errorf("header packet length is %d bytes but only %d bytes are available: %w",
+			plen, l, errParse)
 	}
 
 	return h, packetType(b[1]), plen, nil
@@ -153,7 +157,7 @@ func ParseMessage(b []byte) (Message, error) {
 	// used to choose the appropriate Message and its end offset.
 	h, ptyp, plen, err := parseHeader(b)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ospf3: failed to parse header: %w", err)
 	}
 
 	// Now that we've decoded the Header we can identify the rest of the
@@ -173,7 +177,7 @@ func ParseMessage(b []byte) (Message, error) {
 	// just pass the rest of the payload up to the max defined by
 	// Header.PacketLength.
 	if err := m.unmarshal(b[headerLen:plen]); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ospf3: failed to parse message: %w", err)
 	}
 
 	return m, nil
@@ -234,13 +238,13 @@ func (h *Hello) marshal(b []byte) error {
 // unmarshal implements Message.
 func (h *Hello) unmarshal(b []byte) error {
 	if l := len(b); l < helloLen {
-		return fmt.Errorf("ospf3: not enough bytes for Hello: %d", l)
+		return fmt.Errorf("not enough bytes for Hello: %d: %w", l, errParse)
 	}
 
 	// Hello must end on a 4 byte boundary so we can parse any possible
 	// NeighborIDs in the trailing array.
 	if l := len(b); l%4 != 0 {
-		return fmt.Errorf("ospf3: Hello message must end on a 4 byte boundary, got %d bytes", l)
+		return fmt.Errorf("Hello message must end on a 4 byte boundary, got %d bytes: %w", l, errParse)
 	}
 
 	h.InterfaceID = binary.BigEndian.Uint32(b[0:4])
@@ -332,7 +336,7 @@ func (dd *DatabaseDescription) marshal(b []byte) error {
 // unmarshal implements Message.
 func (dd *DatabaseDescription) unmarshal(b []byte) error {
 	if l := len(b); l < ddLen {
-		return fmt.Errorf("ospf3: not enough bytes for DatabaseDescription: %d", l)
+		return fmt.Errorf("not enough bytes for DatabaseDescription: %d: %w", l, errParse)
 	}
 
 	// b[0] is reserved.
@@ -347,7 +351,7 @@ func (dd *DatabaseDescription) unmarshal(b []byte) error {
 	// possible LSAHeaders in the trailing array.
 	const lsaOff = 12
 	if l := len(b[lsaOff:]); l%lsaHeaderLen != 0 {
-		return fmt.Errorf("ospf3: DatabaseDescription message must end on a 20 byte boundary for trailing LSA headers, got %d bytes", l)
+		return fmt.Errorf("DatabaseDescription message must end on a 20 byte boundary for trailing LSA headers, got %d bytes: %w", l, errParse)
 	}
 
 	// We now know the number of LSA headers because they have a fixed size.
