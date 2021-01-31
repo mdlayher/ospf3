@@ -27,5 +27,20 @@ jobs:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v1
 
-    - name: Run tests
+    - name: Run unprivileged tests
       run: go test -race ./...
+
+    - name: Set up veth pair for privileged tests
+      run: sudo ip link add vethospf0 type veth peer name vethospf1
+
+    - name: Bring up vethospf0
+      run: sudo ip link set up vethospf0
+
+    - name: Bring up vethospf1
+      run: sudo ip link set up vethospf1
+
+    - name: Build test binary
+      run: go test -c -race .
+
+    - name: Run privileged tests
+      run: sudo ./ospf3.test
