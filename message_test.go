@@ -341,6 +341,36 @@ func BenchmarkMarshalMessage(b *testing.B) {
 				},
 			},
 		},
+		{
+			name: "DatabaseDescription",
+			m: &DatabaseDescription{
+				Header: Header{
+					RouterID:   ID{192, 0, 2, 1},
+					InstanceID: 1,
+				},
+				Options:        V6Bit | EBit | RBit | AFBit,
+				InterfaceMTU:   1500,
+				Flags:          IBit | MBit,
+				SequenceNumber: 1,
+				LSAs: []LSAHeader{
+					{
+						Age:               1 * time.Second,
+						Type:              RouterLSA,
+						AdvertisingRouter: ID{192, 0, 2, 1},
+						SequenceNumber:    255,
+						Length:            20,
+					},
+					{
+						Age:               2 * time.Second,
+						Type:              LinkLSA,
+						LinkStateID:       ID{0, 0, 0, 5},
+						AdvertisingRouter: ID{192, 0, 2, 1},
+						SequenceNumber:    511,
+						Length:            20,
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -363,6 +393,10 @@ func BenchmarkParseMessage(b *testing.B) {
 		{
 			name: "Hello",
 			b:    msgHello,
+		},
+		{
+			name: "DatabaseDescription",
+			b:    msgDatabaseDescription,
 		},
 	}
 
