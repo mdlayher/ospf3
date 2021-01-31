@@ -316,6 +316,41 @@ func TestMessageRoundTrip(t *testing.T) {
 	}
 }
 
+func Test_flagsString(t *testing.T) {
+	tests := []struct {
+		name  string
+		f     uint
+		names []string
+		s     string
+	}{
+		{
+			name: "empty",
+			f:    1,
+			s:    "0x1",
+		},
+		{
+			name:  "known",
+			f:     1<<0 | 1<<1 | 1<<2,
+			names: []string{"A", "B", "C"},
+			s:     "A|B|C",
+		},
+		{
+			name:  "unknown",
+			f:     1<<1 | 1<<3 | 1<<10,
+			names: []string{"foo", "bar", "baz", "qux"},
+			s:     "bar|qux|0x400",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if diff := cmp.Diff(tt.s, flagsString(tt.f, tt.names)); diff != "" {
+				t.Fatalf("unexpected string (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func BenchmarkMarshalMessage(b *testing.B) {
 	tests := []struct {
 		name string
