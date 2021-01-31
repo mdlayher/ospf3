@@ -225,6 +225,40 @@ func TestParseMessageErrors(t *testing.T) {
 	}
 }
 
+func TestMarshalMessageErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		m    Message
+	}{
+		{
+			name: "untyped nil",
+		},
+		{
+			name: "Hello Options",
+			m: &Hello{
+				Options: 0xf0000000 | V6Bit,
+			},
+		},
+		{
+			name: "DatabaseDescription Options",
+			m: &DatabaseDescription{
+				Options: 0xf0000000 | V6Bit,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := MarshalMessage(tt.m)
+			if diff := cmp.Diff(errMarshal, err, cmpopts.EquateErrors()); diff != "" {
+				t.Fatalf("unexpected error (-want +got):\n%s", diff)
+			}
+
+			t.Logf("err: %v", err)
+		})
+	}
+}
+
 func TestMessageRoundTrip(t *testing.T) {
 	tests := []struct {
 		name string

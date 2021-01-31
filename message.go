@@ -11,7 +11,10 @@ import (
 const version = 3
 
 // Sentinel errors used to differentiate various types of errors in tests.
-var errParse = errors.New("failed to parse bytes")
+var (
+	errMarshal = errors.New("failed to marshal bytes")
+	errParse   = errors.New("failed to parse bytes")
+)
 
 // A packetType is the type of an OSPFv3 packet.
 type packetType uint8
@@ -50,6 +53,10 @@ const (
 	LBit     Options = 1 << 9
 	ATBit    Options = 1 << 10
 )
+
+// valid checks if the Options bitmask is valid; that is, if it only has bits
+// set in the lower 24 bits of the uint32.
+func (o Options) valid() bool { return (o & 0xff000000) == 0 }
 
 // String returns the string representation of an Options bitmask.
 func (o Options) String() string {
@@ -141,11 +148,16 @@ type Message interface {
 
 // MarshalMessage turns a Message into OSPFv3 packet bytes.
 func MarshalMessage(m Message) ([]byte, error) {
+	// TODO(mdlayher): do we care about typed nil checks?
+	if m == nil {
+		return nil, fmt.Errorf("ospf3: cannot marshal nil Message: %w", errMarshal)
+	}
+
 	// Allocate enough space for the fixed length Header and then the
 	// appropriate number of bytes for the trailing message.
 	b := make([]byte, m.len())
 	if err := m.marshal(b); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ospf3: failed to marshal Message: %w", err)
 	}
 
 	return b, nil
@@ -157,7 +169,7 @@ func ParseMessage(b []byte) (Message, error) {
 	// used to choose the appropriate Message and its end offset.
 	h, ptyp, plen, err := parseHeader(b)
 	if err != nil {
-		return nil, fmt.Errorf("ospf3: failed to parse header: %w", err)
+		return nil, fmt.Errorf("ospf3: failed to parse Header: %w", err)
 	}
 
 	// Now that we've decoded the Header we can identify the rest of the
@@ -177,7 +189,7 @@ func ParseMessage(b []byte) (Message, error) {
 	// just pass the rest of the payload up to the max defined by
 	// Header.PacketLength.
 	if err := m.unmarshal(b[headerLen:plen]); err != nil {
-		return nil, fmt.Errorf("ospf3: failed to parse message: %w", err)
+		return nil, fmt.Errorf("ospf3: failed to parse Message: %w", err)
 	}
 
 	return m, nil
@@ -213,6 +225,10 @@ func (h *Hello) len() int {
 
 // marshal implements Message.
 func (h *Hello) marshal(b []byte) error {
+	if !h.Options.valid() {
+		return fmt.Errorf("Hello Options bitmask is not valid: %w", errMarshal)
+	}
+
 	// Marshal the Header and then store the Hello bytes following it.
 	const n = headerLen
 	h.Header.marshal(b[:n], hello, uint16(h.len()))
@@ -313,6 +329,10 @@ func (dd *DatabaseDescription) len() int {
 
 // marshal implements Message.
 func (dd *DatabaseDescription) marshal(b []byte) error {
+	if !dd.Options.valid() {
+		return fmt.Errorf("Hello Options bitmask is not valid: %w", errMarshal)
+	}
+
 	// Marshal the Header and then store the Database Description bytes following it.
 	const n = headerLen
 	dd.Header.marshal(b[:n], databaseDescription, uint16(dd.len()))
