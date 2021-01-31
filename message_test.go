@@ -44,7 +44,7 @@ var (
 	msgDatabaseDescription = []byte{
 		// Header
 		version,                    // OSPFv3
-		uint8(databaseDescription), // Hello
+		uint8(databaseDescription), // Database Description
 		0x00, 68,                   // PacketLength
 		192, 0, 2, 1, // Router ID
 		0, 0, 0, 0, // Area ID
@@ -192,7 +192,7 @@ func TestParseMessageErrors(t *testing.T) {
 			b: []byte{
 				// Header
 				version,                    // OSPFv3
-				uint8(databaseDescription), // Hello
+				uint8(databaseDescription), // Database Descriptions
 				0x00, 29,                   // PacketLength
 				192, 0, 2, 1, // Router ID
 				0, 0, 0, 0, // Area ID
