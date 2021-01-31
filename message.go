@@ -148,7 +148,6 @@ type Message interface {
 
 // MarshalMessage turns a Message into OSPFv3 packet bytes.
 func MarshalMessage(m Message) ([]byte, error) {
-	// TODO(mdlayher): do we care about typed nil checks?
 	if m == nil {
 		return nil, fmt.Errorf("ospf3: cannot marshal nil Message: %w", errMarshal)
 	}
