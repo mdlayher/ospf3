@@ -1,0 +1,4 @@
+cmd/
+testdata/
+ospf3-fuzz.zip
+ospf3.pcap

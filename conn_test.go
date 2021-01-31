@@ -1,8 +1,7 @@
-package ospf3_test
+package ospf3
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"sync"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/mdlayher/ospf3"
 )
 
 func TestConn(t *testing.T) {
@@ -20,12 +18,12 @@ func TestConn(t *testing.T) {
 	// verify that information at the end of the test.
 	const n = 3
 	type msg struct {
-		ID ospf3.ID
+		ID ID
 		IP net.IP
 	}
 
 	var (
-		id   = ospf3.ID{192, 0, 2, 1}
+		id   = ID{192, 0, 2, 1}
 		msgC = make(chan msg, n)
 	)
 
@@ -39,9 +37,8 @@ func TestConn(t *testing.T) {
 
 		for i := 0; i < n; i++ {
 			err := c1.WriteTo(
-				&ospf3.Hello{Header: ospf3.Header{RouterID: id}},
-				nil,
-				ospf3.AllSPFRouters,
+				&Hello{Header: Header{RouterID: id}},
+				AllSPFRouters,
 			)
 			if err != nil {
 				panicf("failed to write Hello: %v", err)
@@ -63,14 +60,22 @@ func TestConn(t *testing.T) {
 			}
 
 			// Enforce IPv6 header invariants.
-			if cm.HopLimit != 1 || cm.TrafficClass != 0xc0 {
+			if cm.HopLimit != hopLimit || cm.TrafficClass != tclass || cm.IfIndex != c2.ifi.Index {
 				panicf("invalid IPv6 control message: %+v", cm)
+			}
+
+			// Kernel checksumming must be on.
+			// TODO(mdlayher): compute the checksum for validity? Probably not
+			// worth it.
+			h := m.(*Hello).Header
+			if h.Checksum == 0 {
+				panicf("no Header checksum set: %#04x", h.Checksum)
 			}
 
 			msgC <- msg{
 				// TODO(mdlayher): consider adding a Header method to the
 				// Message interface.
-				ID: m.(*ospf3.Hello).Header.RouterID,
+				ID: h.RouterID,
 				IP: cm.Dst,
 			}
 		}
@@ -78,15 +83,15 @@ func TestConn(t *testing.T) {
 
 	// Verify that every message has the expected contents.
 	for m := range msgC {
-		if diff := cmp.Diff(msg{ID: id, IP: ospf3.AllSPFRouters.IP}, m); diff != "" {
+		if diff := cmp.Diff(msg{ID: id, IP: AllSPFRouters.IP}, m); diff != "" {
 			t.Fatalf("unexpected message (-want +got):\n%s", diff)
 		}
 	}
 }
 
-// testConns sets up a pair of *ospf3.Conns pointed at each other using a fixed
+// testConns sets up a pair of *Conns pointed at each other using a fixed
 // set of veth interfaces for integration testing purposes.
-func testConns(t *testing.T) (c1, c2 *ospf3.Conn) {
+func testConns(t *testing.T) (c1, c2 *Conn) {
 	t.Helper()
 
 	var veths [2]*net.Interface
@@ -107,9 +112,9 @@ func testConns(t *testing.T) (c1, c2 *ospf3.Conn) {
 	// Now that we have the veths, make sure they're usable.
 	waitInterfacesReady(t, veths[0], veths[1])
 
-	var conns [2]*ospf3.Conn
+	var conns [2]*Conn
 	for i, v := range veths {
-		c, err := ospf3.Listen(v)
+		c, err := Listen(v)
 		if err != nil {
 			if errors.Is(err, os.ErrPermission) {
 				t.Skipf("skipping, permission denied while trying to listen OSPFv3 on %q", v.Name)
@@ -194,8 +199,4 @@ func linkLocalReady(t *testing.T, addrs []net.Addr, zone string) bool {
 	}
 
 	return false
-}
-
-func panicf(format string, a ...interface{}) {
-	panic(fmt.Sprintf(format, a...))
 }

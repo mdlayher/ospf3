@@ -7,6 +7,12 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
+// Fixed IPv6 header parameters for Conn use.
+const (
+	tclass   = 0xc0 // DSCP CS6, per appendix A.1.
+	hopLimit = 1
+)
+
 var (
 	// AllSPFRouters is the IPv6 multicast group address that all routers
 	// running OSPFv3 should participate in.
@@ -32,16 +38,36 @@ func Listen(ifi *net.Interface) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	c := ipv6.NewPacketConn(conn)
 
 	// Return all possible control message information to the caller so they
 	// can make more informed choices.
-	c := ipv6.NewPacketConn(conn)
 	if err := c.SetControlMessage(^ipv6.ControlFlags(0), true); err != nil {
+		return nil, err
+	}
+
+	// Process checksums in the OSPFv3 header.
+	if err := c.SetChecksum(true, 12); err != nil {
+		return nil, err
+	}
+
+	// Set IPv6 header parameters per the RFC.
+	if err := c.SetHopLimit(hopLimit); err != nil {
+		return nil, err
+	}
+	if err := c.SetMulticastHopLimit(hopLimit); err != nil {
+		return nil, err
+	}
+	if err := c.SetTrafficClass(tclass); err != nil {
 		return nil, err
 	}
 
 	// Join the appropriate multicast groups. Note that point-to-point links
 	// don't use DR/BDR and can skip joining that group.
+	if err := c.SetMulticastInterface(ifi); err != nil {
+		return nil, err
+	}
+
 	groups := []*net.IPAddr{AllSPFRouters}
 	if ifi.Flags&net.FlagPointToPoint == 0 {
 		groups = append(groups, AllDRouters)
@@ -51,6 +77,11 @@ func Listen(ifi *net.Interface) (*Conn, error) {
 		if err := c.JoinGroup(ifi, g); err != nil {
 			return nil, err
 		}
+	}
+
+	// Don't read our own multicast messages during concurrent read/write.
+	if err := c.SetMulticastLoopback(false); err != nil {
+		return nil, err
 	}
 
 	return &Conn{
@@ -98,22 +129,16 @@ func (c *Conn) ReadFrom() (Message, *ipv6.ControlMessage, *net.IPAddr, error) {
 }
 
 // WriteTo writes a single OSPFv3 Message to the specified destination address
-// with an optional IPv6 control message. If cm is nil, a default control
-// message will be used with parameters specific to OSPFv3.
-func (c *Conn) WriteTo(m Message, cm *ipv6.ControlMessage, dst *net.IPAddr) error {
+// or multicast group.
+func (c *Conn) WriteTo(m Message, dst *net.IPAddr) error {
 	b, err := MarshalMessage(m)
 	if err != nil {
 		return err
 	}
 
-	if cm == nil {
-		cm = &ipv6.ControlMessage{
-			TrafficClass: 0xc0, // DSCP CS6, per appendix A.1.
-			HopLimit:     1,    // Always 1.
-			IfIndex:      c.ifi.Index,
-		}
-	}
-
-	_, err = c.c.WriteTo(b, cm, dst)
+	// TODO(mdlayher): consider parameterizing control message if necessary but
+	// it seems that x/net/ipv6 lets us configure the kernel to do a lot of the
+	// work for us.
+	_, err = c.c.WriteTo(b, nil, dst)
 	return err
 }
