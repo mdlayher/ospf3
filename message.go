@@ -431,10 +431,10 @@ type FloodingScope uint8
 
 // Possible FloodingScope values.
 const (
-	LinkLocalScoping FloodingScope = 0
-	AreaScoping      FloodingScope = 1
-	ASScoping        FloodingScope = 2
-	reservedScoping  FloodingScope = 3
+	LinkLocalScoping FloodingScope = 0b00
+	AreaScoping      FloodingScope = 0b01
+	ASScoping        FloodingScope = 0b10
+	reservedScoping  FloodingScope = 0b11
 )
 
 // An LSAHeader is an OSPFv3 Link State Advertisement header as described in
