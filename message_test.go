@@ -446,35 +446,35 @@ func TestMarshalMessageErrors(t *testing.T) {
 	}
 }
 
-func TestMessageRoundTrip(t *testing.T) {
-	tests := []struct {
-		name string
-		b    []byte
-		m    Message
-	}{
-		{
-			name: "hello",
-			b:    bufHello,
-			m:    msgHello,
-		},
-		{
-			name: "database description",
-			b:    bufDatabaseDescription,
-			m:    msgDatabaseDescription,
-		},
-		{
-			name: "link state request",
-			b:    bufLinkStateRequest,
-			m:    msgLinkStateRequest,
-		},
-		{
-			name: "link state acknowledgement",
-			b:    bufLinkStateAcknowledgement,
-			m:    msgLinkStateAcknowledgement,
-		},
-	}
+var roundTripTests = []struct {
+	name string
+	b    []byte
+	m    Message
+}{
+	{
+		name: "hello",
+		b:    bufHello,
+		m:    msgHello,
+	},
+	{
+		name: "database description",
+		b:    bufDatabaseDescription,
+		m:    msgDatabaseDescription,
+	},
+	{
+		name: "link state request",
+		b:    bufLinkStateRequest,
+		m:    msgLinkStateRequest,
+	},
+	{
+		name: "link state acknowledgement",
+		b:    bufLinkStateAcknowledgement,
+		m:    msgLinkStateAcknowledgement,
+	},
+}
 
-	for _, tt := range tests {
+func TestMessageRoundTrip(t *testing.T) {
+	for _, tt := range roundTripTests {
 		t.Run(tt.name, func(t *testing.T) {
 			m1, err := ParseMessage(tt.b)
 			if err != nil {
@@ -501,6 +501,31 @@ func TestMessageRoundTrip(t *testing.T) {
 
 			if diff := cmp.Diff(m1, m2); diff != "" {
 				t.Fatalf("unexpected final Message (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestMessageAllocations(t *testing.T) {
+	for _, tt := range roundTripTests {
+		t.Run(tt.name, func(t *testing.T) {
+			nParse := int(testing.AllocsPerRun(5, func() {
+				_, _ = ParseMessage(tt.b)
+			}))
+
+			// Expect one allocation for the fixed length header/message and a
+			// second for the internal slice which carries trailing data.
+			if diff := cmp.Diff(2, nParse); diff != "" {
+				t.Fatalf("unexpected number of parsing allocations (-want +got):\n%s", diff)
+			}
+
+			nMarshal := int(testing.AllocsPerRun(5, func() {
+				_, _ = MarshalMessage(tt.m)
+			}))
+
+			// Expect one allocation for the entire marshaling process.
+			if diff := cmp.Diff(1, nMarshal); diff != "" {
+				t.Fatalf("unexpected number of marshaling allocations (-want +got):\n%s", diff)
 			}
 		})
 	}
