@@ -10,36 +10,76 @@ import (
 )
 
 var (
-	bufHello = []byte{
-		// Header
-		version,      // OSPFv3
-		uint8(hello), // Hello
-		0x00, 44,     // PacketLength
+	bufTrailing = []byte{0xff, 0xff, 0xff, 0xff}
+
+	bufHeaderCommon = []byte{
 		192, 0, 2, 1, // Router ID
 		0, 0, 0, 0, // Area ID
 		0x00, 0x00, // Checksum
 		0x01, // InstanceID
 		0x00, // Reserved
-
-		// Hello
-		0x00, 0x00, 0x00, 0x01, // Interface ID
-		0x01,                                 // Router priority
-		0x00, 0x00, byte(V6Bit) | byte(EBit), // Options
-		0x00, 0x05, // Hello interval
-		0x00, 0x0a, // Router dead interval
-		192, 0, 2, 1, // Designated router ID
-		192, 0, 2, 2, // Backup designated router ID
-		// Neighbor IDs
-		192, 0, 2, 2,
-		192, 0, 2, 3,
-
-		// LSA headers
-		0x00, 0x01,
-		0x00, 0x00,
-
-		// Trailing bytes, ignored
-		0x00, 0x00, 0x00, 0x00,
 	}
+
+	bufRouterLSA = []byte{
+		byte(RouterLSA >> 8), byte(RouterLSA & 0x00ff), // Type
+		0, 0, 0, 0, // Link state ID
+		192, 0, 2, 1, // Advertising router
+	}
+
+	bufRouterLSAHeader = merge(
+		[]byte{
+			0x00, 0x01, // Age
+		},
+		bufRouterLSA,
+		[]byte{
+			0x00, 0x00, 0x00, 0xff, // Sequence number
+			0x00, 0x00, // Checksum
+			0x00, lsaHeaderLen, // Length
+		},
+	)
+
+	bufLinkLSAHeader = merge(
+		[]byte{
+			0x00, 0x02, // Age
+		},
+		bufLinkLSA,
+		[]byte{
+			0x00, 0x00, 0x01, 0xff, // Sequence number
+			0x00, 0x00, // Checksum
+			0x00, lsaHeaderLen, // Length
+		},
+	)
+
+	bufLinkLSA = []byte{
+		byte(LinkLSA >> 8), byte(LinkLSA & 0x00ff), // Type
+		0, 0, 0, 5, // Link state ID
+		192, 0, 2, 1, // Advertising router
+	}
+
+	bufHello = merge(
+		// Header
+		[]byte{
+			version,      // OSPFv3
+			uint8(hello), // Hello
+			0x00, 44,     // PacketLength
+		},
+		bufHeaderCommon,
+		// Hello
+		[]byte{
+			0x00, 0x00, 0x00, 0x01, // Interface ID
+			0x01,                                 // Router priority
+			0x00, 0x00, byte(V6Bit) | byte(EBit), // Options
+			0x00, 0x05, // Hello interval
+			0x00, 0x0a, // Router dead interval
+			192, 0, 2, 1, // Designated router ID
+			192, 0, 2, 2, // Backup designated router ID
+			// Neighbor IDs
+			192, 0, 2, 2,
+			192, 0, 2, 3,
+		},
+		// Ignored.
+		bufTrailing,
+	)
 
 	msgHello = &Hello{
 		Header: Header{
@@ -59,47 +99,28 @@ var (
 		},
 	}
 
-	bufDatabaseDescription = []byte{
+	bufDatabaseDescription = merge(
 		// Header
-		version,                    // OSPFv3
-		uint8(databaseDescription), // Database Description
-		0x00, 68,                   // PacketLength
-		192, 0, 2, 1, // Router ID
-		0, 0, 0, 0, // Area ID
-		0x00, 0x00, // Checksum
-		0x01, // InstanceID
-		0x00, // Reserved
-
+		[]byte{
+			version,                    // OSPFv3
+			uint8(databaseDescription), // Database Description
+			0x00, 68,                   // PacketLength
+		},
+		bufHeaderCommon,
 		// DatabaseDescription
-		0x00, 0x00, byte(AFBit - 255), byte(V6Bit) | byte(EBit) | byte(RBit), // Options
-		0x05, 0xdc, // Interface MTU
-		0x00,                    // Reserved
-		byte(IBit) | byte(MBit), // Flags
-		0x00, 0x00, 0x00, 0x01,  // Sequence number
-
+		[]byte{
+			0x00, 0x00, byte(AFBit - 255), byte(V6Bit) | byte(EBit) | byte(RBit), // Options
+			0x05, 0xdc, // Interface MTU
+			0x00,                    // Reserved
+			byte(IBit) | byte(MBit), // Flags
+			0x00, 0x00, 0x00, 0x01,  // Sequence number
+		},
 		// LSA headers
-		//
-		// Router-LSA
-		0x00, 0x01, // Age
-		byte(RouterLSA >> 8), byte(RouterLSA & 0x00ff), // Type
-		0, 0, 0, 0, // Link state ID
-		192, 0, 2, 1, // Advertising router
-		0x00, 0x00, 0x00, 0xff, // Sequence number
-		0x00, 0x00, // Checksum
-		0x00, lsaHeaderLen, // Length
-
-		// Link-LSA
-		0x00, 0x02, // Age
-		byte(LinkLSA >> 8), byte(LinkLSA & 0x00ff), // Type
-		0, 0, 0, 5, // Link state ID
-		192, 0, 2, 1, // Advertising router
-		0x00, 0x00, 0x01, 0xff, // Sequence number
-		0x00, 0x00, // Checksum
-		0x00, lsaHeaderLen, // Length
-
-		// Trailing bytes, ignored
-		0x00, 0x00, 0x00, 0x00,
-	}
+		bufRouterLSAHeader,
+		bufLinkLSAHeader,
+		// Ignored.
+		bufTrailing,
+	)
 
 	msgDatabaseDescription = &DatabaseDescription{
 		Header: Header{
@@ -133,31 +154,22 @@ var (
 		},
 	}
 
-	bufLinkStateRequest = []byte{
+	bufLinkStateRequest = merge(
 		// Header
-		version,                 // OSPFv3
-		uint8(linkStateRequest), // Link State Request
-		0x00, 40,                // PacketLength
-		192, 0, 2, 1, // Router ID
-		0, 0, 0, 0, // Area ID
-		0x00, 0x00, // Checksum
-		0x01, // InstanceID
-		0x00, // Reserved
-
-		// LinkStateRequest LSAs
-		//
-		// Router-LSA
-		0x00, 0x00, // Reserved
-		byte(RouterLSA >> 8), byte(RouterLSA & 0x00ff), // Type
-		0, 0, 0, 0, // Link state ID
-		192, 0, 2, 1, // Advertising router
-
-		// Link-LSA
-		0x00, 0x00, // Reserved
-		byte(LinkLSA >> 8), byte(LinkLSA & 0x00ff), // Type
-		0, 0, 0, 5, // Link state ID
-		192, 0, 2, 1, // Advertising router
-	}
+		[]byte{
+			version,                 // OSPFv3
+			uint8(linkStateRequest), // Link State Request
+			0x00, 40,                // PacketLength
+		},
+		bufHeaderCommon,
+		// LinkStateRequest LSAs (with reserved padding).
+		[]byte{0x00, 0x00},
+		bufRouterLSA,
+		[]byte{0x00, 0x00},
+		bufLinkLSA,
+		// Ignored.
+		bufTrailing,
+	)
 
 	msgLinkStateRequest = &LinkStateRequest{
 		Header: Header{
@@ -176,7 +188,59 @@ var (
 			},
 		},
 	}
+
+	bufLinkStateAcknowledgement = merge(
+		// Header
+		[]byte{
+			version,                         // OSPFv3
+			uint8(linkStateAcknowledgement), // Link State Acknowledgement
+			0x00, 56,                        // PacketLength
+		},
+		bufHeaderCommon,
+		// LinkStateAcknowledgement LSA headers
+		bufRouterLSAHeader,
+		bufLinkLSAHeader,
+		// Ignored.
+		bufTrailing,
+	)
+
+	msgLinkStateAcknowledgement = &LinkStateAcknowledgement{
+		Header: Header{
+			RouterID:   ID{192, 0, 2, 1},
+			InstanceID: 1,
+		},
+		LSAs: []LSAHeader{
+			{
+				Age: 1 * time.Second,
+				LSA: LSA{
+					Type:              RouterLSA,
+					AdvertisingRouter: ID{192, 0, 2, 1},
+				},
+				SequenceNumber: 255,
+				Length:         20,
+			},
+			{
+				Age: 2 * time.Second,
+				LSA: LSA{
+					Type:              LinkLSA,
+					LinkStateID:       ID{0, 0, 0, 5},
+					AdvertisingRouter: ID{192, 0, 2, 1},
+				},
+				SequenceNumber: 511,
+				Length:         20,
+			},
+		},
+	}
 )
+
+func merge(bs ...[]byte) []byte {
+	var out []byte
+	for _, b := range bs {
+		out = append(out, b...)
+	}
+
+	return out
+}
 
 func TestParseMessageErrors(t *testing.T) {
 	tests := []struct {
@@ -301,8 +365,7 @@ func TestParseMessageErrors(t *testing.T) {
 				byte(IBit) | byte(MBit), // Flags
 				0x00, 0x00, 0x00, 0x01,  // Sequence number
 
-				// LSA headers, truncated
-				0xff,
+				0xff, // Truncated LSA header
 			},
 		},
 		{
@@ -318,6 +381,21 @@ func TestParseMessageErrors(t *testing.T) {
 				0x00,
 
 				0xff, // Truncated LSA
+			},
+		},
+		{
+			name: "bad link state acknowledgement LSAs",
+			b: []byte{
+				version,
+				uint8(linkStateAcknowledgement),
+				0x00, 17, // Header + 1 trailing byte
+				0x00, 0x00,
+				192, 0, 2, 1,
+				0, 0, 0, 0,
+				0x01,
+				0x00,
+
+				0xff, // Truncated LSA header
 			},
 		},
 	}
@@ -388,6 +466,11 @@ func TestMessageRoundTrip(t *testing.T) {
 			name: "link state request",
 			b:    bufLinkStateRequest,
 			m:    msgLinkStateRequest,
+		},
+		{
+			name: "link state acknowledgement",
+			b:    bufLinkStateAcknowledgement,
+			m:    msgLinkStateAcknowledgement,
 		},
 	}
 
@@ -475,6 +558,10 @@ func BenchmarkMarshalMessage(b *testing.B) {
 			name: "link state request",
 			m:    msgLinkStateRequest,
 		},
+		{
+			name: "link state acknowledgement",
+			m:    msgLinkStateAcknowledgement,
+		},
 	}
 
 	for _, tt := range tests {
@@ -505,6 +592,10 @@ func BenchmarkParseMessage(b *testing.B) {
 		{
 			name: "link state request",
 			b:    bufLinkStateRequest,
+		},
+		{
+			name: "link state acknowledgement",
+			b:    bufLinkStateAcknowledgement,
 		},
 	}
 

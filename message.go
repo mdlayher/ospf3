@@ -11,8 +11,8 @@ const (
 	// version is the OSPF version supported by this library (OSPFv3).
 	version = 3
 
-	// Fixed length structures. Note that lsrLen doesn't exist since that
-	// message only contains LSAs.
+	// Fixed length structures. Note that some messages don't have constants
+	// here because they only contain trailing variable length data.
 	headerLen    = 16
 	lsaLen       = 12
 	lsaHeaderLen = 20
@@ -194,6 +194,8 @@ func ParseMessage(b []byte) (Message, error) {
 		m = &DatabaseDescription{Header: h}
 	case linkStateRequest:
 		m = &LinkStateRequest{Header: h}
+	case linkStateAcknowledgement:
+		m = &LinkStateAcknowledgement{Header: h}
 	default:
 		// TODO(mdlayher): implement more Messages!
 		return nil, fmt.Errorf("ospf3: parsing not implemented message type: %d", ptyp)
@@ -446,6 +448,62 @@ func (lsr *LinkStateRequest) unmarshal(b []byte) error {
 		)
 
 		lsr.LSAs = append(lsr.LSAs, parseLSA(b[start:end]))
+	}
+
+	return nil
+}
+
+var _ Message = &LinkStateAcknowledgement{}
+
+// A LinkStateAcknowledgement is an OSPFv3 Link State Acknowledgement message as
+// described in RFC5340, appendix A.3.6.
+type LinkStateAcknowledgement struct {
+	Header Header
+	LSAs   []LSAHeader
+}
+
+// len implements Message.
+func (lsa *LinkStateAcknowledgement) len() int {
+	// Fixed Header plus 20 bytes per LSA header. Notably this message has no
+	// body of its own.
+	return headerLen + (lsaHeaderLen * len(lsa.LSAs))
+}
+
+// marshal implements Message.
+func (lsa *LinkStateAcknowledgement) marshal(b []byte) error {
+	// Marshal the Header and then store the LSA header bytes following it.
+	const n = headerLen
+	lsa.Header.marshal(b[:n], linkStateAcknowledgement, uint16(lsa.len()))
+
+	// Each LSA header is packed into 20 adjacent bytes.
+	nn := n
+	for i := range lsa.LSAs {
+		lsa.LSAs[i].marshal(b[nn : nn+lsaHeaderLen])
+		nn += lsaHeaderLen
+	}
+
+	return nil
+}
+
+// unmarshal implements Message.
+func (lsa *LinkStateAcknowledgement) unmarshal(b []byte) error {
+	// LinkStateAcknowledgement must end on a 20 byte boundary so we can parse
+	// any possible LSAHeaders in the trailing array.
+	if l := len(b); l%lsaHeaderLen != 0 {
+		return fmt.Errorf("LinkStateAcknowledgement message must end on a 20 byte boundary for trailing LSA headers, got %d bytes: %w", l, errParse)
+	}
+
+	// We now know the number of LSA headers because they have a fixed size.
+	n := len(b) / lsaHeaderLen
+	lsa.LSAs = make([]LSAHeader, 0, n)
+	for i := 0; i < n; i++ {
+		// Parse each 20 byte LSA header from the slice.
+		var (
+			start = i * lsaHeaderLen
+			end   = lsaHeaderLen + (i * lsaHeaderLen)
+		)
+
+		lsa.LSAs = append(lsa.LSAs, parseLSAHeader(b[start:end]))
 	}
 
 	return nil
