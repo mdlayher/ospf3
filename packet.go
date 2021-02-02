@@ -11,7 +11,7 @@ const (
 	// version is the OSPF version supported by this library (OSPFv3).
 	version = 3
 
-	// Fixed length structures. Note that some messages don't have constants
+	// Fixed length structures. Note that some packets don't have constants
 	// here because they only contain trailing variable length data.
 	headerLen    = 16
 	lsaLen       = 12
@@ -92,10 +92,10 @@ func (o Options) String() string {
 }
 
 // A Header is the OSPFv3 packet header as described in RFC5340, appendix A.3.1.
-// Headers accompany each Message implementation. The Header only allows setting
+// Headers accompany each Packet implementation. The Header only allows setting
 // OSPFv3 header fields which are not calculated programmatically. Version,
 // packet type, and packet length are set automatically when calling
-// MarshalMessage.
+// MarshalPacket.
 type Header struct {
 	RouterID   ID
 	AreaID     ID
@@ -139,7 +139,7 @@ func parseHeader(b []byte) (Header, packetType, int, error) {
 	// TODO(mdlayher): inspect Checksum?
 
 	// Make sure the input buffer has enough data as indicated by the packet
-	// length field so we know how much to pass to Message.unmarshal.
+	// length field so we know how much to pass to Packet.unmarshal.
 	plen := int(binary.BigEndian.Uint16(b[2:4]))
 	if plen < headerLen {
 		return Header{}, 0, 0, fmt.Errorf("header packet length %d is too short for a valid packet: %w", plen, errParse)
@@ -152,68 +152,68 @@ func parseHeader(b []byte) (Header, packetType, int, error) {
 	return h, packetType(b[1]), plen, nil
 }
 
-// A Message is an OSPFv3 message.
-type Message interface {
+// A Packet is an OSPFv3 packet.
+type Packet interface {
 	len() int
 	marshal(b []byte) error
 	unmarshal(b []byte) error
 }
 
-// MarshalMessage turns a Message into OSPFv3 packet bytes.
-func MarshalMessage(m Message) ([]byte, error) {
-	if m == nil {
-		return nil, fmt.Errorf("ospf3: cannot marshal nil Message: %w", errMarshal)
+// MarshalPacket turns a Packet into OSPFv3 packet bytes.
+func MarshalPacket(p Packet) ([]byte, error) {
+	if p == nil {
+		return nil, fmt.Errorf("ospf3: cannot marshal nil Packet: %w", errMarshal)
 	}
 
 	// Allocate enough space for the fixed length Header and then the
-	// appropriate number of bytes for the trailing message.
-	b := make([]byte, m.len())
-	if err := m.marshal(b); err != nil {
-		return nil, fmt.Errorf("ospf3: failed to marshal Message: %w", err)
+	// appropriate number of bytes for the trailing packet.
+	b := make([]byte, p.len())
+	if err := p.marshal(b); err != nil {
+		return nil, fmt.Errorf("ospf3: failed to marshal Packet: %w", err)
 	}
 
 	return b, nil
 }
 
-// ParseMessage parses an OSPFv3 Header and trailing Message from bytes.
-func ParseMessage(b []byte) (Message, error) {
-	// The Header is added to each Message and the parsed type and length are
-	// used to choose the appropriate Message and its end offset.
+// ParsePacket parses an OSPFv3 Header and trailing Packet from bytes.
+func ParsePacket(b []byte) (Packet, error) {
+	// The Header is added to each Packet and the parsed type and length are
+	// used to choose the appropriate Packet and its end offset.
 	h, ptyp, plen, err := parseHeader(b)
 	if err != nil {
 		return nil, fmt.Errorf("ospf3: failed to parse Header: %w", err)
 	}
 
 	// Now that we've decoded the Header we can identify the rest of the
-	// payload as a known Message type.
-	var m Message
+	// payload as a known Packet type.
+	var p Packet
 	switch ptyp {
 	case hello:
-		m = &Hello{Header: h}
+		p = &Hello{Header: h}
 	case databaseDescription:
-		m = &DatabaseDescription{Header: h}
+		p = &DatabaseDescription{Header: h}
 	case linkStateRequest:
-		m = &LinkStateRequest{Header: h}
+		p = &LinkStateRequest{Header: h}
 	case linkStateAcknowledgement:
-		m = &LinkStateAcknowledgement{Header: h}
+		p = &LinkStateAcknowledgement{Header: h}
 	default:
-		// TODO(mdlayher): implement more Messages!
-		return nil, fmt.Errorf("ospf3: parsing not implemented message type: %d", ptyp)
+		// TODO(mdlayher): implement more Packets!
+		return nil, fmt.Errorf("ospf3: parsing not implemented packet type: %d", ptyp)
 	}
 
 	// The unmarshal methods assume the header has already been processed so
 	// just pass the rest of the payload up to the max defined by
 	// Header.PacketLength.
-	if err := m.unmarshal(b[headerLen:plen]); err != nil {
-		return nil, fmt.Errorf("ospf3: failed to parse Message: %w", err)
+	if err := p.unmarshal(b[headerLen:plen]); err != nil {
+		return nil, fmt.Errorf("ospf3: failed to parse Packet: %w", err)
 	}
 
-	return m, nil
+	return p, nil
 }
 
-var _ Message = &Hello{}
+var _ Packet = &Hello{}
 
-// A Hello is an OSPFv3 Hello message as described in RFC5340, appendix A.3.2.
+// A Hello is an OSPFv3 Hello packet as described in RFC5340, appendix A.3.2.
 type Hello struct {
 	Header                   Header
 	InterfaceID              uint32
@@ -226,13 +226,13 @@ type Hello struct {
 	NeighborIDs              []ID
 }
 
-// len implements Message.
+// len implements Packet.
 func (h *Hello) len() int {
 	// Fixed Header and Hello, plus 4 bytes per neighbor ID.
 	return headerLen + helloLen + (4 * len(h.NeighborIDs))
 }
 
-// marshal implements Message.
+// marshal implements Packet.
 func (h *Hello) marshal(b []byte) error {
 	if !h.Options.valid() {
 		return fmt.Errorf("Hello Options bitmask is not valid: %w", errMarshal)
@@ -260,7 +260,7 @@ func (h *Hello) marshal(b []byte) error {
 	return nil
 }
 
-// unmarshal implements Message.
+// unmarshal implements Packet.
 func (h *Hello) unmarshal(b []byte) error {
 	if l := len(b); l < helloLen {
 		return fmt.Errorf("not enough bytes for Hello: %d: %w", l, errParse)
@@ -269,7 +269,7 @@ func (h *Hello) unmarshal(b []byte) error {
 	// Hello must end on a 4 byte boundary so we can parse any possible
 	// NeighborIDs in the trailing array.
 	if l := len(b); l%4 != 0 {
-		return fmt.Errorf("Hello message must end on a 4 byte boundary, got %d bytes: %w", l, errParse)
+		return fmt.Errorf("Hello packet must end on a 4 byte boundary, got %d bytes: %w", l, errParse)
 	}
 
 	h.InterfaceID = binary.BigEndian.Uint32(b[0:4])
@@ -293,7 +293,7 @@ func (h *Hello) unmarshal(b []byte) error {
 	return nil
 }
 
-// DDFlags are flags which may appear in an OSPFv3 Database Description message
+// DDFlags are flags which may appear in an OSPFv3 Database Description packet
 // as described in RFC5340, appendix A.3.3.
 type DDFlags uint16
 
@@ -313,9 +313,9 @@ func (f DDFlags) String() string {
 	})
 }
 
-var _ Message = &DatabaseDescription{}
+var _ Packet = &DatabaseDescription{}
 
-// A DatabaseDescription is an OSPFv3 Database Description message as described
+// A DatabaseDescription is an OSPFv3 Database Description packet as described
 // in RFC5340, appendix A.3.3.
 type DatabaseDescription struct {
 	Header         Header
@@ -326,13 +326,13 @@ type DatabaseDescription struct {
 	LSAs           []LSAHeader
 }
 
-// len implements Message.
+// len implements Packet.
 func (dd *DatabaseDescription) len() int {
 	// Fixed Header and DatabaseDescription, plus 20 bytes per LSA header.
 	return headerLen + ddLen + (lsaHeaderLen * len(dd.LSAs))
 }
 
-// marshal implements Message.
+// marshal implements Packet.
 func (dd *DatabaseDescription) marshal(b []byte) error {
 	if !dd.Options.valid() {
 		return fmt.Errorf("Hello Options bitmask is not valid: %w", errMarshal)
@@ -358,7 +358,7 @@ func (dd *DatabaseDescription) marshal(b []byte) error {
 	return nil
 }
 
-// unmarshal implements Message.
+// unmarshal implements Packet.
 func (dd *DatabaseDescription) unmarshal(b []byte) error {
 	if l := len(b); l < ddLen {
 		return fmt.Errorf("not enough bytes for DatabaseDescription: %d: %w", l, errParse)
@@ -376,7 +376,7 @@ func (dd *DatabaseDescription) unmarshal(b []byte) error {
 	// possible LSAHeaders in the trailing array.
 	const lsaOff = 12
 	if l := len(b[lsaOff:]); l%lsaHeaderLen != 0 {
-		return fmt.Errorf("DatabaseDescription message must end on a 20 byte boundary for trailing LSA headers, got %d bytes: %w", l, errParse)
+		return fmt.Errorf("DatabaseDescription packet must end on a 20 byte boundary for trailing LSA headers, got %d bytes: %w", l, errParse)
 	}
 
 	// We now know the number of LSA headers because they have a fixed size.
@@ -395,23 +395,23 @@ func (dd *DatabaseDescription) unmarshal(b []byte) error {
 	return nil
 }
 
-var _ Message = &LinkStateRequest{}
+var _ Packet = &LinkStateRequest{}
 
-// A LinkStateRequest is an OSPFv3 Link State Request message as described
+// A LinkStateRequest is an OSPFv3 Link State Request packet as described
 // in RFC5340, appendix A.3.4.
 type LinkStateRequest struct {
 	Header Header
 	LSAs   []LSA
 }
 
-// len implements Message.
+// len implements Packet.
 func (lsr *LinkStateRequest) len() int {
-	// Fixed Header plus 12 bytes per LSA. Notably this message has no body
+	// Fixed Header plus 12 bytes per LSA. Notably this packet has no body
 	// of its own.
 	return headerLen + (lsaLen * len(lsr.LSAs))
 }
 
-// marshal implements Message.
+// marshal implements Packet.
 func (lsr *LinkStateRequest) marshal(b []byte) error {
 	// Marshal the Header and then store the LSA bytes following it.
 	const n = headerLen
@@ -428,12 +428,12 @@ func (lsr *LinkStateRequest) marshal(b []byte) error {
 	return nil
 }
 
-// unmarshal implements Message.
+// unmarshal implements Packet.
 func (lsr *LinkStateRequest) unmarshal(b []byte) error {
 	// LinkStateRequest must end on a 12 byte boundary so we can parse any
 	// possible LSAs in the trailing array.
 	if l := len(b); l%lsaLen != 0 {
-		return fmt.Errorf("LinkStateRequest message must end on a 12 byte boundary for trailing LSAs, got %d bytes: %w", l, errParse)
+		return fmt.Errorf("LinkStateRequest packet must end on a 12 byte boundary for trailing LSAs, got %d bytes: %w", l, errParse)
 	}
 
 	// We now know the number of LSAs because they have a fixed size.
@@ -453,23 +453,23 @@ func (lsr *LinkStateRequest) unmarshal(b []byte) error {
 	return nil
 }
 
-var _ Message = &LinkStateAcknowledgement{}
+var _ Packet = &LinkStateAcknowledgement{}
 
-// A LinkStateAcknowledgement is an OSPFv3 Link State Acknowledgement message as
+// A LinkStateAcknowledgement is an OSPFv3 Link State Acknowledgement packet as
 // described in RFC5340, appendix A.3.6.
 type LinkStateAcknowledgement struct {
 	Header Header
 	LSAs   []LSAHeader
 }
 
-// len implements Message.
+// len implements Packet.
 func (lsa *LinkStateAcknowledgement) len() int {
-	// Fixed Header plus 20 bytes per LSA header. Notably this message has no
+	// Fixed Header plus 20 bytes per LSA header. Notably this packet has no
 	// body of its own.
 	return headerLen + (lsaHeaderLen * len(lsa.LSAs))
 }
 
-// marshal implements Message.
+// marshal implements Packet.
 func (lsa *LinkStateAcknowledgement) marshal(b []byte) error {
 	// Marshal the Header and then store the LSA header bytes following it.
 	const n = headerLen
@@ -485,12 +485,12 @@ func (lsa *LinkStateAcknowledgement) marshal(b []byte) error {
 	return nil
 }
 
-// unmarshal implements Message.
+// unmarshal implements Packet.
 func (lsa *LinkStateAcknowledgement) unmarshal(b []byte) error {
 	// LinkStateAcknowledgement must end on a 20 byte boundary so we can parse
 	// any possible LSAHeaders in the trailing array.
 	if l := len(b); l%lsaHeaderLen != 0 {
-		return fmt.Errorf("LinkStateAcknowledgement message must end on a 20 byte boundary for trailing LSA headers, got %d bytes: %w", l, errParse)
+		return fmt.Errorf("LinkStateAcknowledgement packet must end on a 20 byte boundary for trailing LSA headers, got %d bytes: %w", l, errParse)
 	}
 
 	// We now know the number of LSA headers because they have a fixed size.

@@ -81,7 +81,7 @@ var (
 		bufTrailing,
 	)
 
-	msgHello = &Hello{
+	pktHello = &Hello{
 		Header: Header{
 			RouterID:   ID{192, 0, 2, 1},
 			InstanceID: 1,
@@ -122,7 +122,7 @@ var (
 		bufTrailing,
 	)
 
-	msgDatabaseDescription = &DatabaseDescription{
+	pktDatabaseDescription = &DatabaseDescription{
 		Header: Header{
 			RouterID:   ID{192, 0, 2, 1},
 			InstanceID: 1,
@@ -171,7 +171,7 @@ var (
 		bufTrailing,
 	)
 
-	msgLinkStateRequest = &LinkStateRequest{
+	pktLinkStateRequest = &LinkStateRequest{
 		Header: Header{
 			RouterID:   ID{192, 0, 2, 1},
 			InstanceID: 1,
@@ -204,7 +204,7 @@ var (
 		bufTrailing,
 	)
 
-	msgLinkStateAcknowledgement = &LinkStateAcknowledgement{
+	pktLinkStateAcknowledgement = &LinkStateAcknowledgement{
 		Header: Header{
 			RouterID:   ID{192, 0, 2, 1},
 			InstanceID: 1,
@@ -242,7 +242,7 @@ func merge(bs ...[]byte) []byte {
 	return out
 }
 
-func TestParseMessageErrors(t *testing.T) {
+func TestParsePacketErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		b    []byte
@@ -402,7 +402,7 @@ func TestParseMessageErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParseMessage(tt.b)
+			_, err := ParsePacket(tt.b)
 			if diff := cmp.Diff(errParse, err, cmpopts.EquateErrors()); diff != "" {
 				t.Fatalf("unexpected error (-want +got):\n%s", diff)
 			}
@@ -412,23 +412,23 @@ func TestParseMessageErrors(t *testing.T) {
 	}
 }
 
-func TestMarshalMessageErrors(t *testing.T) {
+func TestMarshalPacketErrors(t *testing.T) {
 	tests := []struct {
 		name string
-		m    Message
+		p    Packet
 	}{
 		{
 			name: "untyped nil",
 		},
 		{
 			name: "Hello Options",
-			m: &Hello{
+			p: &Hello{
 				Options: 0xf0000000 | V6Bit,
 			},
 		},
 		{
 			name: "DatabaseDescription Options",
-			m: &DatabaseDescription{
+			p: &DatabaseDescription{
 				Options: 0xf0000000 | V6Bit,
 			},
 		},
@@ -436,7 +436,7 @@ func TestMarshalMessageErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := MarshalMessage(tt.m)
+			_, err := MarshalPacket(tt.p)
 			if diff := cmp.Diff(errMarshal, err, cmpopts.EquateErrors()); diff != "" {
 				t.Fatalf("unexpected error (-want +got):\n%s", diff)
 			}
@@ -449,43 +449,43 @@ func TestMarshalMessageErrors(t *testing.T) {
 var roundTripTests = []struct {
 	name string
 	b    []byte
-	m    Message
+	p    Packet
 }{
 	{
 		name: "hello",
 		b:    bufHello,
-		m:    msgHello,
+		p:    pktHello,
 	},
 	{
 		name: "database description",
 		b:    bufDatabaseDescription,
-		m:    msgDatabaseDescription,
+		p:    pktDatabaseDescription,
 	},
 	{
 		name: "link state request",
 		b:    bufLinkStateRequest,
-		m:    msgLinkStateRequest,
+		p:    pktLinkStateRequest,
 	},
 	{
 		name: "link state acknowledgement",
 		b:    bufLinkStateAcknowledgement,
-		m:    msgLinkStateAcknowledgement,
+		p:    pktLinkStateAcknowledgement,
 	},
 }
 
-func TestMessageRoundTrip(t *testing.T) {
+func TestPacketRoundTrip(t *testing.T) {
 	for _, tt := range roundTripTests {
 		t.Run(tt.name, func(t *testing.T) {
-			m1, err := ParseMessage(tt.b)
+			p1, err := ParsePacket(tt.b)
 			if err != nil {
-				t.Fatalf("failed to parse first Message: %v", err)
+				t.Fatalf("failed to parse first Packet: %v", err)
 			}
 
-			if diff := cmp.Diff(tt.m, m1); diff != "" {
-				t.Fatalf("unexpected initial Message (-want +got):\n%s", diff)
+			if diff := cmp.Diff(tt.p, p1); diff != "" {
+				t.Fatalf("unexpected initial Packet (-want +got):\n%s", diff)
 			}
 
-			b, err := MarshalMessage(m1)
+			b, err := MarshalPacket(p1)
 			if err != nil {
 				t.Fatalf("failed to marshal: %v", err)
 			}
@@ -494,23 +494,23 @@ func TestMessageRoundTrip(t *testing.T) {
 				t.Fatalf("unexpected bytes (-want +got):\n%s", diff)
 			}
 
-			m2, err := ParseMessage(b)
+			p2, err := ParsePacket(b)
 			if err != nil {
-				t.Fatalf("failed to parse second Message: %v", err)
+				t.Fatalf("failed to parse second Packet: %v", err)
 			}
 
-			if diff := cmp.Diff(m1, m2); diff != "" {
-				t.Fatalf("unexpected final Message (-want +got):\n%s", diff)
+			if diff := cmp.Diff(p1, p2); diff != "" {
+				t.Fatalf("unexpected final Packet (-want +got):\n%s", diff)
 			}
 		})
 	}
 }
 
-func TestMessageAllocations(t *testing.T) {
+func TestPacketAllocations(t *testing.T) {
 	for _, tt := range roundTripTests {
 		t.Run(tt.name, func(t *testing.T) {
 			nParse := int(testing.AllocsPerRun(5, func() {
-				_, _ = ParseMessage(tt.b)
+				_, _ = ParsePacket(tt.b)
 			}))
 
 			// Expect one allocation for the fixed length header/message and a
@@ -520,7 +520,7 @@ func TestMessageAllocations(t *testing.T) {
 			}
 
 			nMarshal := int(testing.AllocsPerRun(5, func() {
-				_, _ = MarshalMessage(tt.m)
+				_, _ = MarshalPacket(tt.p)
 			}))
 
 			// Expect one allocation for the entire marshaling process.
@@ -566,26 +566,26 @@ func Test_flagsString(t *testing.T) {
 	}
 }
 
-func BenchmarkMarshalMessage(b *testing.B) {
+func BenchmarkMarshalPacket(b *testing.B) {
 	tests := []struct {
 		name string
-		m    Message
+		p    Packet
 	}{
 		{
 			name: "hello",
-			m:    msgHello,
+			p:    pktHello,
 		},
 		{
 			name: "database description",
-			m:    msgDatabaseDescription,
+			p:    pktDatabaseDescription,
 		},
 		{
 			name: "link state request",
-			m:    msgLinkStateRequest,
+			p:    pktLinkStateRequest,
 		},
 		{
 			name: "link state acknowledgement",
-			m:    msgLinkStateAcknowledgement,
+			p:    pktLinkStateAcknowledgement,
 		},
 	}
 
@@ -593,7 +593,7 @@ func BenchmarkMarshalMessage(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				if _, err := MarshalMessage(tt.m); err != nil {
+				if _, err := MarshalPacket(tt.p); err != nil {
 					b.Fatalf("failed to marshal: %v", err)
 				}
 			}
@@ -601,7 +601,7 @@ func BenchmarkMarshalMessage(b *testing.B) {
 	}
 }
 
-func BenchmarkParseMessage(b *testing.B) {
+func BenchmarkParsePacket(b *testing.B) {
 	tests := []struct {
 		name string
 		b    []byte
@@ -628,7 +628,7 @@ func BenchmarkParseMessage(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				if _, err := ParseMessage(tt.b); err != nil {
+				if _, err := ParsePacket(tt.b); err != nil {
 					b.Fatalf("failed to parse: %v", err)
 				}
 			}

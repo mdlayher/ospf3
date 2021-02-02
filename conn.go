@@ -23,7 +23,7 @@ var (
 	AllDRouters = &net.IPAddr{IP: net.ParseIP("ff02::6")}
 )
 
-// A Conn can send and receive OSPFv3 messages which implement the Message
+// A Conn can send and receive OSPFv3 packets which implement the Packet
 // interface.
 type Conn struct {
 	c      *ipv6.PacketConn
@@ -79,7 +79,7 @@ func Listen(ifi *net.Interface) (*Conn, error) {
 		}
 	}
 
-	// Don't read our own multicast messages during concurrent read/write.
+	// Don't read our own multicast packets during concurrent read/write.
 	if err := c.SetMulticastLoopback(false); err != nil {
 		return nil, err
 	}
@@ -107,10 +107,10 @@ func (c *Conn) SetReadDeadline(t time.Time) error {
 	return c.c.SetReadDeadline(t)
 }
 
-// ReadFrom reads a single OSPFv3 message and returns a Message along with its
+// ReadFrom reads a single OSPFv3 packet and returns a Packet along with its
 // associated IPv6 control message and source address. ReadFrom will block until
-// a timeout occurs or a valid OSPFv3 message is read.
-func (c *Conn) ReadFrom() (Message, *ipv6.ControlMessage, *net.IPAddr, error) {
+// a timeout occurs or a valid OSPFv3 packet is read.
+func (c *Conn) ReadFrom() (Packet, *ipv6.ControlMessage, *net.IPAddr, error) {
 	b := make([]byte, c.ifi.MTU)
 	for {
 		n, cm, src, err := c.c.ReadFrom(b)
@@ -118,20 +118,20 @@ func (c *Conn) ReadFrom() (Message, *ipv6.ControlMessage, *net.IPAddr, error) {
 			return nil, nil, nil, err
 		}
 
-		m, err := ParseMessage(b[:n])
+		p, err := ParsePacket(b[:n])
 		if err != nil {
 			// Assume invalid OSPFv3 data, keep reading.
 			continue
 		}
 
-		return m, cm, src.(*net.IPAddr), nil
+		return p, cm, src.(*net.IPAddr), nil
 	}
 }
 
-// WriteTo writes a single OSPFv3 Message to the specified destination address
+// WriteTo writes a single OSPFv3 Packet to the specified destination address
 // or multicast group.
-func (c *Conn) WriteTo(m Message, dst *net.IPAddr) error {
-	b, err := MarshalMessage(m)
+func (c *Conn) WriteTo(p Packet, dst *net.IPAddr) error {
+	b, err := MarshalPacket(p)
 	if err != nil {
 		return err
 	}

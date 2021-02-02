@@ -14,7 +14,7 @@ import (
 func TestConn(t *testing.T) {
 	c1, c2 := testConns(t)
 
-	// Pass a series of fixed messages from a sender to a receiver and then
+	// Pass a series of fixed packets from a sender to a receiver and then
 	// verify that information at the end of the test.
 	const n = 3
 	type msg struct {
@@ -31,7 +31,7 @@ func TestConn(t *testing.T) {
 	wg.Add(2)
 	defer wg.Wait()
 
-	// Send multicast Hello messages.
+	// Send multicast Hello packets.
 	go func() {
 		defer wg.Done()
 
@@ -46,7 +46,7 @@ func TestConn(t *testing.T) {
 		}
 	}()
 
-	// Receive messages and pass them back to the main goroutine on the channel.
+	// Receive packets and pass them back to the main goroutine on the channel.
 	go func() {
 		defer func() {
 			close(msgC)
@@ -54,9 +54,9 @@ func TestConn(t *testing.T) {
 		}()
 
 		for i := 0; i < n; i++ {
-			m, cm, _, err := c2.ReadFrom()
+			p, cm, _, err := c2.ReadFrom()
 			if err != nil {
-				panicf("failed to read Message: %v", err)
+				panicf("failed to read Packet: %v", err)
 			}
 
 			// Enforce IPv6 header invariants.
@@ -67,14 +67,14 @@ func TestConn(t *testing.T) {
 			// Kernel checksumming must be on.
 			// TODO(mdlayher): compute the checksum for validity? Probably not
 			// worth it.
-			h := m.(*Hello).Header
+			h := p.(*Hello).Header
 			if h.Checksum == 0 {
 				panicf("no Header checksum set: %#04x", h.Checksum)
 			}
 
 			msgC <- msg{
 				// TODO(mdlayher): consider adding a Header method to the
-				// Message interface.
+				// Packet interface.
 				ID: h.RouterID,
 				IP: cm.Dst,
 			}
